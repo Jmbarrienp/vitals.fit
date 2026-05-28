@@ -1,0 +1,77 @@
+import { UsersService } from './users.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+export declare class UsersController {
+    private usersService;
+    constructor(usersService: UsersService);
+    getMe(req: any): Promise<{
+        id: string;
+        createdAt: Date;
+        email: string;
+        provider: import("@prisma/client").$Enums.AuthProvider;
+        profile: {
+            id: string;
+            userId: string;
+            createdAt: Date;
+            name: string;
+            updatedAt: Date;
+            age: number;
+            weightKg: number;
+            heightCm: number;
+            sex: import("@prisma/client").$Enums.Sex;
+            activityLevel: import("@prisma/client").$Enums.ActivityLevel;
+            fitnessLevel: import("@prisma/client").$Enums.FitnessLevel;
+            equipment: import("@prisma/client").$Enums.Equipment;
+            dietaryRestrictions: string[];
+            allergies: string[];
+            medicalConditions: string[];
+            daysAvailablePerWeek: number;
+            sessionDurationMin: number;
+            timezone: string;
+            country: string | null;
+            persona: import("@prisma/client").$Enums.PersonaType;
+            onboardingCompleted: boolean;
+        };
+        goals: {
+            id: string;
+            type: import("@prisma/client").$Enums.GoalType;
+            userId: string;
+            createdAt: Date;
+            isActive: boolean;
+            updatedAt: Date;
+            targetWeightKg: number | null;
+            targetCalories: number;
+            proteinG: number;
+            carbsG: number;
+            fatG: number;
+            fiberTargetG: number;
+            waterMl: number;
+            bmr: number;
+            tdee: number;
+            formulaUsed: string;
+            goalAdjustment: number;
+        }[];
+    }>;
+    updateProfile(req: any, dto: UpdateProfileDto): Promise<{
+        id: string;
+        userId: string;
+        createdAt: Date;
+        name: string;
+        updatedAt: Date;
+        age: number;
+        weightKg: number;
+        heightCm: number;
+        sex: import("@prisma/client").$Enums.Sex;
+        activityLevel: import("@prisma/client").$Enums.ActivityLevel;
+        fitnessLevel: import("@prisma/client").$Enums.FitnessLevel;
+        equipment: import("@prisma/client").$Enums.Equipment;
+        dietaryRestrictions: string[];
+        allergies: string[];
+        medicalConditions: string[];
+        daysAvailablePerWeek: number;
+        sessionDurationMin: number;
+        timezone: string;
+        country: string | null;
+        persona: import("@prisma/client").$Enums.PersonaType;
+        onboardingCompleted: boolean;
+    }>;
+}

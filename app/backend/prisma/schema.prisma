@@ -1,0 +1,678 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// AUTH & USERS
+// ─────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String?
+  provider     AuthProvider @default(EMAIL)
+  providerId   String?   // OAuth provider user ID
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  profile         UserProfile?
+  habits          UserHabits?
+  goals           Goal[]
+  mealPlans       MealPlan[]
+  dailyLogs       DailyLog[]
+  weightLogs      WeightLog[]
+  bodyMeasurements BodyMeasurement[]
+  workoutPlans    WorkoutPlan[]
+  workoutLogs     WorkoutLog[]
+  planHistory     PlanHistory[]
+  recommendations Recommendation[]
+  notifications   Notification[]
+  milestones      UserMilestone[]
+  subscription    Subscription?
+  progressPhotos  ProgressPhoto[]
+  tickets         SupportTicket[]
+  deviceTokens    DeviceToken[]
+
+  @@index([email])
+  @@index([deletedAt])
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  APPLE
+}
+
+model UserProfile {
+  id                   String        @id @default(uuid())
+  userId               String        @unique
+  name                 String
+  age                  Int
+  weightKg             Float
+  heightCm             Float
+  sex                  Sex
+  activityLevel        ActivityLevel
+  fitnessLevel         FitnessLevel
+  persona              PersonaType   @default(PRINCIPIANTE_MOTIVADO)
+  dietaryRestrictions  String[]      // ["vegetarian", "vegan", "gluten_free"]
+  allergies            String[]      // absolute — never included in any plan
+  medicalConditions    String[]      // affects calculations and referrals
+  equipment            Equipment     @default(GYM)
+  daysAvailablePerWeek Int           @default(3)
+  sessionDurationMin   Int           @default(45)
+  onboardingCompleted  Boolean       @default(false)
+  timezone             String        @default("America/Mexico_City")
+  country              String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserHabits {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  typicalMealTimes  String[] // ["07:00", "13:00", "19:00"]
+  appUsagePattern   String?  // "morning" | "evening" | "irregular"
+  preferredFoods    String[] // inferred from frequent logs
+  dislikedFoods     String[]
+  lastActiveAt      DateTime?
+  daysInactive      Int      @default(0)
+  longestStreak     Int      @default(0)
+  currentStreak     Int      @default(0)
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Sex {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  MODERATE
+  ACTIVE
+  EXTRA
+}
+
+enum FitnessLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum PersonaType {
+  PRINCIPIANTE_MOTIVADO
+  ATLETA_AMATEUR
+  OCUPADO_CONSISTENTE
+  REINCIDENTE
+  EXPERTO_AUTODIRIGIDO
+}
+
+enum Equipment {
+  GYM
+  HOME
+  NONE
+}
+
+enum GoalType {
+  LOSE_FAT
+  GAIN_MUSCLE
+  MAINTAIN
+  RECOMPOSITION
+  HEALTH_WELLNESS
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+// ─────────────────────────────────────────────
+// GOALS & NUTRITIONAL TARGETS
+// ─────────────────────────────────────────────
+
+model Goal {
+  id              String    @id @default(uuid())
+  userId          String
+  type            GoalType
+  targetWeightKg  Float?
+  targetCalories  Int
+  proteinG        Int
+  carbsG          Int
+  fatG            Int
+  fiberTargetG    Int
+  waterMl         Int
+  bmr             Float
+  tdee            Float
+  formulaUsed     String    // "mifflin_st_jeor" | "harris_benedict"
+  goalAdjustment  Int       // negative = deficit, positive = surplus
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planHistory PlanHistory[]
+
+  @@index([userId, isActive])
+}
+
+// ─────────────────────────────────────────────
+// FOOD DATABASE
+// ─────────────────────────────────────────────
+
+model FoodItem {
+  id              String  @id @default(uuid())
+  name            String
+  nameLower       String  // lowercase for fast search
+  nameAliases     String[] // regional names: "frijoles", "caraotas", "porotos"
+  caloriesPer100g Float
+  proteinPer100g  Float
+  carbsPer100g    Float
+  fatPer100g      Float
+  fiberPer100g    Float   @default(0)
+  sodiumMgPer100g Float?
+  source          String  // "usda" | "open_food_facts" | "custom"
+  barcode         String?
+  region          String? // "MX" | "CO" | "PE" — for culturally relevant plans
+  isVerified      Boolean @default(false)
+  isCommon        Boolean @default(false) // top 500 most-used — cached in Redis
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  plannedMealItems PlannedMealItem[]
+  loggedMealItems  LoggedMealItem[]
+
+  @@index([nameLower])
+  @@index([barcode])
+  @@index([isCommon])
+}
+
+// ─────────────────────────────────────────────
+// MEAL PLANS (AI-generated, versioned)
+// ─────────────────────────────────────────────
+
+model MealPlan {
+  id            String    @id @default(uuid())
+  userId        String
+  version       Int       @default(1)
+  isActive      Boolean   @default(true)
+  activatedAt   DateTime  @default(now())
+  deactivatedAt DateTime?
+  generatedBy   String    @default("meal-generation") // which agent/skill
+  createdAt     DateTime  @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  days MealPlanDay[]
+
+  @@index([userId, isActive])
+}
+
+model MealPlanDay {
+  id             String @id @default(uuid())
+  mealPlanId     String
+  dayNumber      Int    // 1–7
+  targetCalories Int
+  targetProteinG Int
+  targetCarbsG   Int
+  targetFatG     Int
+
+  mealPlan MealPlan      @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  meals    PlannedMeal[]
+
+  @@unique([mealPlanId, dayNumber])
+}
+
+model PlannedMeal {
+  id            String   @id @default(uuid())
+  mealPlanDayId String
+  mealType      MealType
+  name          String
+  totalCalories Int
+  totalProteinG Float
+  totalCarbsG   Float
+  totalFatG     Float
+  prepNotes     String?
+
+  mealPlanDay MealPlanDay     @relation(fields: [mealPlanDayId], references: [id], onDelete: Cascade)
+  items       PlannedMealItem[]
+}
+
+model PlannedMealItem {
+  id            String  @id @default(uuid())
+  plannedMealId String
+  foodItemId    String
+  amountG       Float
+  calories      Int
+  proteinG      Float
+  carbsG        Float
+  fatG          Float
+  substitute    String? // "Arroz integral → Quinoa (misma cantidad)"
+
+  plannedMeal PlannedMeal @relation(fields: [plannedMealId], references: [id], onDelete: Cascade)
+  foodItem    FoodItem    @relation(fields: [foodItemId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// DAILY TRACKING (what the user actually ate)
+// ─────────────────────────────────────────────
+
+model DailyLog {
+  id             String    @id @default(uuid())
+  userId         String
+  date           DateTime  @db.Date
+  caloriesLogged Int       @default(0)
+  proteinG       Float     @default(0)
+  carbsG         Float     @default(0)
+  fatG           Float     @default(0)
+  planFollowed   Boolean?  // null = not evaluated yet — critical for progress-analyst
+  adherencePct   Float?    // 0.0–1.0
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loggedMeals LoggedMeal[]
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model LoggedMeal {
+  id            String   @id @default(uuid())
+  dailyLogId    String
+  mealType      MealType
+  name          String?
+  loggedAt      DateTime @default(now())
+  totalCalories Int
+  totalProteinG Float
+  totalCarbsG   Float
+  totalFatG     Float
+
+  dailyLog DailyLog        @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  items    LoggedMealItem[]
+}
+
+model LoggedMealItem {
+  id           String @id @default(uuid())
+  loggedMealId String
+  foodItemId   String
+  amountG      Float
+  calories     Int
+  proteinG     Float
+  carbsG       Float
+  fatG         Float
+
+  loggedMeal LoggedMeal @relation(fields: [loggedMealId], references: [id], onDelete: Cascade)
+  foodItem   FoodItem   @relation(fields: [foodItemId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// PROGRESS TRACKING
+// ─────────────────────────────────────────────
+
+model WeightLog {
+  id        String   @id @default(uuid())
+  userId    String
+  weightKg  Float
+  date      DateTime @default(now())
+  notes     String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date]) // progress-analyst queries last 30 days constantly
+}
+
+model BodyMeasurement {
+  id          String   @id @default(uuid())
+  userId      String
+  date        DateTime @db.Date
+  waistCm     Float?
+  hipCm       Float?
+  chestCm     Float?
+  armCm       Float?
+  thighCm     Float?
+  neckCm      Float?
+  bodyFatPct  Float?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model ProgressPhoto {
+  id        String   @id @default(uuid())
+  userId    String
+  date      DateTime @db.Date
+  storageUrl String  // reference to S3/Cloudinary — never store binaries in DB
+  angle     String?  // "front" | "side" | "back"
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+// ─────────────────────────────────────────────
+// PLAN HISTORY (adaptive-planning versioning)
+// ─────────────────────────────────────────────
+
+model PlanHistory {
+  id               String    @id @default(uuid())
+  userId           String
+  goalId           String
+  version          Int
+  caloriesTarget   Int
+  proteinG         Int
+  carbsG           Int
+  fatG             Int
+  activeFrom       DateTime
+  activeTo         DateTime?
+  reasonForChange  String?   // "Weight stalled 2 weeks with 78% adherence"
+  agentResponsible String?   // "adaptive-planning" | "recommendation-engine"
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal Goal @relation(fields: [goalId], references: [id])
+
+  @@index([userId, activeFrom])
+}
+
+// ─────────────────────────────────────────────
+// AI AGENT OUTPUTS
+// ─────────────────────────────────────────────
+
+model Recommendation {
+  id                   String               @id @default(uuid())
+  userId               String
+  type                 RecommendationType
+  priority             Priority
+  trigger              String               // "stalled_progress" | "low_adherence" | ...
+  progressStatus       String?              // "on_track" | "stalled" | "regressing"
+  planChange           Boolean              @default(false)
+  calorieAdjustment    Int?
+  macroAdjustments     Json?                // { protein_g: 0, carbs_g: -35, fat_g: -3 }
+  messageForUser       String
+  requiresConfirmation Boolean              @default(false)
+  status               RecommendationStatus @default(PENDING)
+  userResponse         String?
+  expiresAt            DateTime?
+  respondedAt          DateTime?
+  createdAt            DateTime             @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+enum RecommendationType {
+  PLAN_ADJUSTMENT
+  REINFORCEMENT
+  BEHAVIOR_RECOMMENDATION
+  EDUCATIONAL
+  ALERT
+  MILESTONE
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum RecommendationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Notification {
+  id                 String           @id @default(uuid())
+  userId             String
+  type               NotificationType
+  trigger            String
+  title              String
+  body               String
+  scheduledFor       DateTime
+  sentAt             DateTime?
+  openedAt           DateTime?
+  delivered          Boolean          @default(false)
+  milestoneTriggered String?
+  dataReferenced     String[]         // ["streak_days: 5", "weight_loss_week: 0.4kg"]
+  personaApplied     PersonaType
+  createdAt          DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scheduledFor])
+  @@index([userId, sentAt])
+}
+
+enum NotificationType {
+  PUSH
+  IN_APP
+  WEEKLY_SUMMARY
+  MILESTONE
+  REENGAGEMENT
+}
+
+model UserMilestone {
+  id           String        @id @default(uuid())
+  userId       String
+  type         MilestoneType
+  achievedAt   DateTime      @default(now())
+  celebrated   Boolean       @default(false)
+  celebratedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+enum MilestoneType {
+  FIRST_WEEK_COMPLETED
+  FIRST_KG_PROGRESS
+  STREAK_7_DAYS
+  STREAK_30_DAYS
+  DAYS_30_IN_APP
+  PROGRESS_5KG
+  PROGRESS_10KG
+  PROGRESS_15KG
+  PROGRESS_20KG
+  GOAL_REACHED
+}
+
+// ─────────────────────────────────────────────
+// EXERCISE (trainer-agent)
+// ─────────────────────────────────────────────
+
+model WorkoutPlan {
+  id           String       @id @default(uuid())
+  userId       String
+  goal         GoalType
+  fitnessLevel FitnessLevel
+  daysPerWeek  Int
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions WorkoutSession[]
+
+  @@index([userId, isActive])
+}
+
+model WorkoutSession {
+  id                String @id @default(uuid())
+  workoutPlanId     String
+  dayLabel          String // "Lunes"
+  sessionType       String // "strength_upper" | "cardio" | "full_body"
+  durationMin       Int
+  estimatedBurnKcal Int
+
+  workoutPlan WorkoutPlan @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
+  exercises   Exercise[]
+}
+
+model Exercise {
+  id               String @id @default(uuid())
+  workoutSessionId String
+  name             String
+  sets             Int
+  repsMin          Int
+  repsMax          Int
+  restSec          Int
+  notes            String?
+
+  workoutSession WorkoutSession @relation(fields: [workoutSessionId], references: [id], onDelete: Cascade)
+}
+
+model WorkoutLog {
+  id                String   @id @default(uuid())
+  userId            String
+  date              DateTime @db.Date
+  sessionType       String
+  durationMin       Int
+  estimatedBurnKcal Int
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+// ─────────────────────────────────────────────
+// SUBSCRIPTIONS (Fase 2 — monetización)
+// ─────────────────────────────────────────────
+
+model Subscription {
+  id               String             @id @default(uuid())
+  userId           String             @unique
+  plan             SubscriptionPlan   @default(FREE)
+  status           SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd DateTime?
+  cancelledAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  PREMIUM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  TRIAL
+}
+
+// ─────────────────────────────────────────────
+// SUPPORT
+// ─────────────────────────────────────────────
+
+model SupportTicket {
+  id        String       @id @default(uuid())
+  userId    String
+  subject   String
+  message   String
+  status    TicketStatus @default(OPEN)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+// ─────────────────────────────────────────────
+// PUSH NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique // ExponentPushToken[xxx]
+  platform  String           // "ios" | "android"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+}
+
+model PushLog {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String
+  title     String
+  body      String
+  trigger   String   // "meal.logged" | "streak" | "inactivity"
+  status    String   // "sent" | "failed" | "device_not_registered"
+  receiptId String?  // Expo receipt ID for delivery tracking
+  errorCode String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+// ─────────────────────────────────────────────
+// AI OBSERVABILITY
+// ─────────────────────────────────────────────
+
+model AiGenerationLog {
+  id                  String   @id @default(uuid())
+  userId              String
+  trigger             String   // "meal.logged" | "weight.updated"
+  model               String   // "claude-haiku-4-5"
+  latencyMs           Int
+  success             Boolean
+  fallbackUsed        Boolean  @default(false)
+  inputTokenApprox    Int?     // (systemPrompt.length + userPrompt.length) / 4
+  outputTokens        Int?
+  cacheHit            Boolean  @default(false)
+  compactSnapshot     Json?    // { goal, calRemaining, protRemaining, streak, adherence7d, weightTrend }
+  finalRecommendation String?  // truncated to 200 chars
+  errorType           String?  // "APIConnectionError" | "RateLimitError" | "timeout" | …
+  createdAt           DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([success, createdAt])
+  @@index([trigger, createdAt])
+}
