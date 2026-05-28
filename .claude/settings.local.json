@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\barri\\\\OneDrive\\\\Desktop\\\\equipo de agentes start up\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\barri\\\\.claude\\\\plugins\\\\cache\\\\fitness-ai\" -Recurse | ForEach-Object { $_.FullName })",
+      "PowerShell(Stop-Process -Id \\(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue\\).OwningProcess -Force -ErrorAction SilentlyContinue; Write-Host \"done\")",
+      "Bash(npm run *)"
+    ]
+  }
+}
