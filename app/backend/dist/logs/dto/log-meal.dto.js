@@ -28,26 +28,31 @@ __decorate([
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(200),
     __metadata("design:type", String)
 ], LogMealDto.prototype, "name", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)(),
     (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(10000),
     __metadata("design:type", Number)
 ], LogMealDto.prototype, "totalCalories", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)(),
     (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(1000),
     __metadata("design:type", Number)
 ], LogMealDto.prototype, "totalProteinG", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)(),
     (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(2000),
     __metadata("design:type", Number)
 ], LogMealDto.prototype, "totalCarbsG", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)(),
     (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(500),
     __metadata("design:type", Number)
 ], LogMealDto.prototype, "totalFatG", void 0);
 //# sourceMappingURL=log-meal.dto.js.map

@@ -114,24 +114,31 @@ function rulesEngine(snap) {
     const calLogged = snap.today.caloriesLogged;
     const calTarget = snap.targets.calories;
     const calRemaining = calTarget - calLogged;
-    const protRemaining = snap.targets.proteinG - snap.today.proteinG;
+    const protRemaining = Math.round(snap.targets.proteinG - snap.today.proteinG);
     const meals = snap.today.mealsLogged;
     const streak = snap.streak.currentDays;
+    const pct = calTarget > 0 ? Math.round((calLogged / calTarget) * 100) : 0;
     if (meals === 0)
-        return 'Aún no registraste nada hoy. Empieza con el desayuno para trackear bien el día.';
+        return 'Empieza registrando el desayuno — los primeros datos del día son los más importantes.';
+    if (calLogged > calTarget + 200)
+        return `Hoy te pasaste ${calLogged - calTarget} kcal de tu meta. Sin drama — mañana retomas el plan.`;
     if (calLogged > calTarget)
-        return `Superaste tu meta por ${calLogged - calTarget} kcal. Mañana vuelves al plan.`;
-    if (calRemaining < 100 && meals >= 3)
-        return `¡Meta casi cumplida! Solo te faltan ${calRemaining} kcal.`;
+        return `Llegaste a tu meta calórica por hoy. Buen trabajo.`;
+    if (pct >= 85 && meals >= 3)
+        return `Estás al ${pct}% de tu meta. Casi llegas — una comida pequeña puede completar el día.`;
     if (protRemaining > 40)
-        return `Llevas ${Math.round(snap.today.proteinG)}g de proteína. Agrega ${Math.round(protRemaining)}g más para cumplir el objetivo.`;
-    if (calRemaining > 400 && meals >= 3)
-        return `Te quedan ${calRemaining} kcal. Considera otra comida para no quedarte corto.`;
+        return `Te faltan ${protRemaining}g de proteína para hoy. Agrega una fuente proteica en tu próxima comida.`;
+    if (calRemaining > 500 && meals >= 3)
+        return `Llevas ${meals} comidas pero te quedan ${calRemaining} kcal. Considera un snack proteico.`;
+    if (streak >= 14)
+        return `${streak} días seguidos. Eso ya no es motivación — es un hábito.`;
     if (streak >= 7)
-        return `${streak} días seguidos registrando. Consistencia es la clave.`;
-    if (snap.progress.adherencePct7d < 50)
-        return 'Esta semana has cumplido menos del 50% de tus metas. Un día a la vez.';
-    return `Llevas ${calLogged} de ${calTarget} kcal hoy. Vas por buen camino.`;
+        return `Una semana completa trackeando. La consistencia es lo que más importa.`;
+    if (snap.progress.adherencePct7d < 40)
+        return 'Esta semana fue difícil. No necesitas ser perfecto — solo registrar un poco cada día ya ayuda.';
+    if (snap.progress.weightTrendKg !== null && snap.goal === 'lose' && snap.progress.weightTrendKg < -0.1)
+        return 'Tus datos muestran progreso en la dirección correcta. Sigue así.';
+    return `Llevas ${calLogged} de ${calTarget} kcal hoy (${pct}%). Vas bien.`;
 }
 function toCompactSnapshot(snap) {
     return {
