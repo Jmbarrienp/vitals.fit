@@ -26,9 +26,11 @@ export function usePushNotifications() {
 
     void registerForPush();
 
-    // Handle notification tap from cold start (app launched via notification)
+    // Handle notification tap from cold start — delay lets expo-router finish initial navigation
     Notifications.getLastNotificationResponseAsync().then((res) => {
-      if (res) navigateFromNotification(res.notification.request.content.data, router);
+      if (res) {
+        setTimeout(() => navigateFromNotification(res.notification.request.content.data, router), 300);
+      }
     });
 
     foregroundSub.current = Notifications.addNotificationReceivedListener((_n) => {
@@ -52,10 +54,10 @@ function navigateFromNotification(
 ) {
   const trigger = data?.trigger as string | undefined;
   if (trigger === 'weight.updated' || trigger === 'progress') {
-    router.push('/(tabs)/progress');
+    router.navigate('/(tabs)/progress');
   } else {
     // meal.logged, streak, inactivity, default → dashboard
-    router.push('/(tabs)/dashboard');
+    router.navigate('/(tabs)/dashboard');
   }
 }
 
