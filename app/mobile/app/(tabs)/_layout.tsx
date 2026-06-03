@@ -11,18 +11,21 @@ function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
 
 export default function TabLayout() {
   const { isAuthenticated, isLoading: storeLoading } = useAuthStore();
-  const { data: me, isLoading: meLoading, isError } = useMe();
+  const { data: me, isLoading: meLoading, error } = useMe();
   const router = useRouter();
+
+  // Only logout on 401 — network errors (offline, timeout) are transient and must NOT clear the session
+  const isAuthError = !!(error && (error as { response?: { status?: number } })?.response?.status === 401);
 
   useEffect(() => {
     if (!storeLoading && !isAuthenticated) {
       router.replace('/login');
       return;
     }
-    if (!meLoading && isError) {
+    if (!meLoading && isAuthError) {
       router.replace('/login');
     }
-  }, [isAuthenticated, storeLoading, meLoading, isError]);
+  }, [isAuthenticated, storeLoading, meLoading, isAuthError]);
 
   if (storeLoading || (isAuthenticated && meLoading && !me)) {
     return <LoadingScreen message="Cargando tu cuenta..." />;
