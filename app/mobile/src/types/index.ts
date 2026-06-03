@@ -117,6 +117,7 @@ export interface Recommendation {
   id: string;
   type: string;
   priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  trigger: string;
   messageForUser: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
   planChange: boolean;

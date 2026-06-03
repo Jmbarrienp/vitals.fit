@@ -145,6 +145,25 @@ export class RecommendationsService {
     });
   }
 
+  async getHistory(userId: string) {
+    return this.prisma.recommendation.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      select: {
+        id: true,
+        type: true,
+        priority: true,
+        trigger: true,
+        messageForUser: true,
+        status: true,
+        planChange: true,
+        calorieAdjustment: true,
+        createdAt: true,
+      },
+    });
+  }
+
   async respond(userId: string, id: string, action: string) {
     const rec = await this.prisma.recommendation.findFirst({
       where: { id, userId },

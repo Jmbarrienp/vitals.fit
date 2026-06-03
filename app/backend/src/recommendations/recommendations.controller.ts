@@ -18,6 +18,11 @@ export class RecommendationsController {
     return this.recommendationsService.getActive(req.user.id);
   }
 
+  @Get('history')
+  getHistory(@Request() req) {
+    return this.recommendationsService.getHistory(req.user.id);
+  }
+
   @Post(':id/respond')
   respond(@Request() req, @Param('id') id: string, @Body() dto: RespondDto) {
     return this.recommendationsService.respond(req.user.id, id, dto.action);

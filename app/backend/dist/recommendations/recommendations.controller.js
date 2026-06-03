@@ -27,6 +27,9 @@ let RecommendationsController = class RecommendationsController {
     getActive(req) {
         return this.recommendationsService.getActive(req.user.id);
     }
+    getHistory(req) {
+        return this.recommendationsService.getHistory(req.user.id);
+    }
     respond(req, id, dto) {
         return this.recommendationsService.respond(req.user.id, id, dto.action);
     }
@@ -46,6 +49,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], RecommendationsController.prototype, "getActive", null);
+__decorate([
+    (0, common_1.Get)('history'),
+    __param(0, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], RecommendationsController.prototype, "getHistory", null);
 __decorate([
     (0, common_1.Post)(':id/respond'),
     __param(0, (0, common_1.Request)()),

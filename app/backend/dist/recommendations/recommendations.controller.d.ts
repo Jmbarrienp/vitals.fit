@@ -48,6 +48,17 @@ export declare class RecommendationsController {
         expiresAt: Date | null;
         respondedAt: Date | null;
     }[]>;
+    getHistory(req: any): Promise<{
+        id: string;
+        type: import("@prisma/client").$Enums.RecommendationType;
+        trigger: string;
+        createdAt: Date;
+        status: import("@prisma/client").$Enums.RecommendationStatus;
+        priority: import("@prisma/client").$Enums.Priority;
+        planChange: boolean;
+        calorieAdjustment: number;
+        messageForUser: string;
+    }[]>;
     respond(req: any, id: string, dto: RespondDto): Promise<{
         id: string;
         type: import("@prisma/client").$Enums.RecommendationType;

@@ -53,10 +53,11 @@ function navigateFromNotification(
   router: ReturnType<typeof useRouter>,
 ) {
   const trigger = data?.trigger as string | undefined;
-  if (trigger === 'weight.updated' || trigger === 'progress') {
+  if (trigger === 'meal.logged') {
+    router.navigate('/(tabs)/recommendations');
+  } else if (trigger === 'weight.updated' || trigger === 'progress') {
     router.navigate('/(tabs)/progress');
   } else {
-    // meal.logged, streak, inactivity, default → dashboard
     router.navigate('/(tabs)/dashboard');
   }
 }

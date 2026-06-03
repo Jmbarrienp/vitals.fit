@@ -129,6 +129,24 @@ let RecommendationsService = class RecommendationsService {
             orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
         });
     }
+    async getHistory(userId) {
+        return this.prisma.recommendation.findMany({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+            take: 30,
+            select: {
+                id: true,
+                type: true,
+                priority: true,
+                trigger: true,
+                messageForUser: true,
+                status: true,
+                planChange: true,
+                calorieAdjustment: true,
+                createdAt: true,
+            },
+        });
+    }
     async respond(userId, id, action) {
         const rec = await this.prisma.recommendation.findFirst({
             where: { id, userId },
