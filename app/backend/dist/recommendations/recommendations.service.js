@@ -8,13 +8,15 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var RecommendationsService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RecommendationsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
-let RecommendationsService = class RecommendationsService {
+let RecommendationsService = RecommendationsService_1 = class RecommendationsService {
     constructor(prisma) {
         this.prisma = prisma;
+        this.logger = new common_1.Logger(RecommendationsService_1.name);
     }
     async generate(userId) {
         const goal = await this.prisma.goal.findFirst({ where: { userId, isActive: true } });
@@ -130,22 +132,28 @@ let RecommendationsService = class RecommendationsService {
         });
     }
     async getHistory(userId) {
-        return this.prisma.recommendation.findMany({
-            where: { userId },
-            orderBy: { createdAt: 'desc' },
-            take: 30,
-            select: {
-                id: true,
-                type: true,
-                priority: true,
-                trigger: true,
-                messageForUser: true,
-                status: true,
-                planChange: true,
-                calorieAdjustment: true,
-                createdAt: true,
-            },
-        });
+        try {
+            return await this.prisma.recommendation.findMany({
+                where: { userId },
+                orderBy: { createdAt: 'desc' },
+                take: 30,
+                select: {
+                    id: true,
+                    type: true,
+                    priority: true,
+                    trigger: true,
+                    messageForUser: true,
+                    status: true,
+                    planChange: true,
+                    calorieAdjustment: true,
+                    createdAt: true,
+                },
+            });
+        }
+        catch (err) {
+            this.logger.error('getHistory failed', err);
+            throw err;
+        }
     }
     async respond(userId, id, action) {
         const rec = await this.prisma.recommendation.findFirst({
@@ -174,7 +182,7 @@ let RecommendationsService = class RecommendationsService {
     }
 };
 exports.RecommendationsService = RecommendationsService;
-exports.RecommendationsService = RecommendationsService = __decorate([
+exports.RecommendationsService = RecommendationsService = RecommendationsService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService])
 ], RecommendationsService);

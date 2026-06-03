@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class RecommendationsService {
+  private readonly logger = new Logger(RecommendationsService.name);
   constructor(private prisma: PrismaService) {}
 
   async generate(userId: string) {
@@ -146,22 +147,27 @@ export class RecommendationsService {
   }
 
   async getHistory(userId: string) {
-    return this.prisma.recommendation.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 30,
-      select: {
-        id: true,
-        type: true,
-        priority: true,
-        trigger: true,
-        messageForUser: true,
-        status: true,
-        planChange: true,
-        calorieAdjustment: true,
-        createdAt: true,
-      },
-    });
+    try {
+      return await this.prisma.recommendation.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+        select: {
+          id: true,
+          type: true,
+          priority: true,
+          trigger: true,
+          messageForUser: true,
+          status: true,
+          planChange: true,
+          calorieAdjustment: true,
+          createdAt: true,
+        },
+      });
+    } catch (err) {
+      this.logger.error('getHistory failed', err);
+      throw err;
+    }
   }
 
   async respond(userId: string, id: string, action: string) {
