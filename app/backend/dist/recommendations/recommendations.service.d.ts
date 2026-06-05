@@ -1,7 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 export declare class RecommendationsService {
     private prisma;
-    private readonly logger;
     constructor(prisma: PrismaService);
     generate(userId: string): Promise<{
         message: string;

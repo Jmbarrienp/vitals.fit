@@ -40,7 +40,7 @@ function relativeTime(dateStr: string): string {
 export default function RecommendationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: recs, isLoading, isError, error, refetch } = useQuery({
+  const { data: recs, isLoading, isError, refetch } = useQuery({
     queryKey: ['recommendations'],
     queryFn: () => recommendationsApi.getHistory().then((r) => r.data),
     retry: 1,
@@ -71,7 +71,7 @@ export default function RecommendationsScreen() {
         {isError && (
           <Card>
             <ErrorState
-              message={`No pudimos cargar los consejos. ${(error as { response?: { status?: number }; message?: string })?.response?.status ? `(${(error as { response?: { status?: number } })?.response?.status})` : (error as { message?: string })?.message ?? ''}`}
+              message="No pudimos cargar los consejos."
               onRetry={() => void refetch()}
             />
           </Card>
