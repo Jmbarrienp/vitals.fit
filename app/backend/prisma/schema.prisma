@@ -199,10 +199,28 @@ model FoodItem {
 
   plannedMealItems PlannedMealItem[]
   loggedMealItems  LoggedMealItem[]
+  servingSizes     ServingSize[]
 
   @@index([nameLower])
   @@index([barcode])
   @@index([isCommon])
+}
+
+// ─────────────────────────────────────────────
+// SERVING SIZES (unidades caseras: "1 huevo", "1 taza")
+// ─────────────────────────────────────────────
+
+model ServingSize {
+  id         String  @id @default(uuid())
+  foodItemId String
+  label      String  // "1 huevo", "1 taza", "1 arepa", "1 rebanada"
+  grams      Float   // 1 huevo = 50g
+  isDefault  Boolean @default(false)
+
+  foodItem        FoodItem         @relation(fields: [foodItemId], references: [id], onDelete: Cascade)
+  loggedMealItems LoggedMealItem[]
+
+  @@index([foodItemId])
 }
 
 // ─────────────────────────────────────────────
@@ -311,17 +329,25 @@ model LoggedMeal {
 }
 
 model LoggedMealItem {
-  id           String @id @default(uuid())
-  loggedMealId String
-  foodItemId   String
-  amountG      Float
-  calories     Int
-  proteinG     Float
-  carbsG       Float
-  fatG         Float
+  id            String  @id @default(uuid())
+  loggedMealId  String
+  foodItemId    String?         // opcional: ítem manual (one-off) sin alimento de catálogo
+  servingSizeId String?         // si se registró por unidad casera
+  nameSnapshot  String  @default("") // nombre congelado al momento del registro
+  quantity      Float   @default(1)  // 2 (huevos) o 150 (g)
+  unit          String  @default("g") // "g" | "ml" | "serving"
+  amountG       Float           // gramos efectivos resueltos en backend
+  calories      Int
+  proteinG      Float
+  carbsG        Float
+  fatG          Float
 
-  loggedMeal LoggedMeal @relation(fields: [loggedMealId], references: [id], onDelete: Cascade)
-  foodItem   FoodItem   @relation(fields: [foodItemId], references: [id])
+  loggedMeal  LoggedMeal   @relation(fields: [loggedMealId], references: [id], onDelete: Cascade)
+  foodItem    FoodItem?    @relation(fields: [foodItemId], references: [id], onDelete: SetNull)
+  servingSize ServingSize? @relation(fields: [servingSizeId], references: [id], onDelete: SetNull)
+
+  @@index([loggedMealId])
+  @@index([foodItemId])
 }
 
 // ─────────────────────────────────────────────

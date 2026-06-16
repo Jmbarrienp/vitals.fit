@@ -8,7 +8,9 @@
     "start": "node dist/main",
     "dev": "npx tsc && node dist/main",
     "start:dev": "nest start --watch",
-    "start:debug": "nest start --debug --watch"
+    "start:debug": "nest start --debug --watch",
+    "migrate:deploy": "npx prisma migrate deploy",
+    "migrate:status": "npx prisma migrate status"
   },
   "keywords": [],
   "author": "",
