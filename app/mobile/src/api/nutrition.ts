@@ -1,6 +1,30 @@
 import { apiClient } from './client';
 import { Goal, GoalType, NutritionResult, DailyLog, LoggedMeal, MealType } from '../types';
 
+/** Un ítem a registrar: de catálogo (foodItemId) o manual (customName). */
+export interface LogMealItemInput {
+  foodItemId?: string;
+  servingSizeId?: string;
+  customName?: string;
+  unit?: string;
+  quantity: number;
+  calories?: number;
+  proteinG?: number;
+  carbsG?: number;
+  fatG?: number;
+}
+
+/** Payload de registro: nuevo flujo (items[]) o legacy (totales precalculados). */
+export interface LogMealInput {
+  mealType?: MealType;
+  name?: string;
+  items?: LogMealItemInput[];
+  totalCalories?: number;
+  totalProteinG?: number;
+  totalCarbsG?: number;
+  totalFatG?: number;
+}
+
 /** Payload de edición. Enviar totales reemplaza los ítems de la comida (compat backend). */
 export interface UpdateMealPayload {
   mealType?: MealType;
@@ -21,14 +45,7 @@ export const nutritionApi = {
   calculate: () =>
     apiClient.post<NutritionResult>('/nutrition/calculate'),
 
-  logMeal: (data: {
-    mealType: MealType;
-    name?: string;
-    totalCalories: number;
-    totalProteinG: number;
-    totalCarbsG: number;
-    totalFatG: number;
-  }) => apiClient.post('/logs/meal', data),
+  logMeal: (data: LogMealInput) => apiClient.post('/logs/meal', data),
 
   updateMeal: (id: string, data: UpdateMealPayload) =>
     apiClient.patch<DailyLog>(`/logs/meal/${id}`, data),

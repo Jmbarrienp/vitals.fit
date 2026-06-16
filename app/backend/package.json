@@ -10,7 +10,8 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "migrate:deploy": "npx prisma migrate deploy",
-    "migrate:status": "npx prisma migrate status"
+    "migrate:status": "npx prisma migrate status",
+    "smoke:1c": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-1c.ts"
   },
   "keywords": [],
   "author": "",
@@ -25,6 +26,7 @@
     "@types/node": "^25.6.0",
     "@types/passport-jwt": "^4.0.1",
     "dotenv": "^17.4.2",
+    "embedded-postgres": "^18.4.0-beta.17",
     "ts-node": "^10.9.2"
   },
   "dependencies": {

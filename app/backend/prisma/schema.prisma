@@ -39,6 +39,7 @@ model User {
   progressPhotos  ProgressPhoto[]
   tickets         SupportTicket[]
   deviceTokens    DeviceToken[]
+  foodFavorites   FoodFavorite[]
 
   @@index([email])
   @@index([deletedAt])
@@ -182,6 +183,7 @@ model FoodItem {
   id              String  @id @default(uuid())
   name            String
   nameLower       String  // lowercase for fast search
+  nameNormalized  String  @default("") // accent-stripped + lowercase, for typo/accent-insensitive search
   nameAliases     String[] // regional names: "frijoles", "caraotas", "porotos"
   caloriesPer100g Float
   proteinPer100g  Float
@@ -189,9 +191,10 @@ model FoodItem {
   fatPer100g      Float
   fiberPer100g    Float   @default(0)
   sodiumMgPer100g Float?
-  source          String  // "usda" | "open_food_facts" | "custom"
+  source          String  // "usda" | "open_food_facts" | "custom" | "curated_latam"
   barcode         String?
   region          String? // "MX" | "CO" | "PE" — for culturally relevant plans
+  createdByUserId String? // null = global catalog; set = private custom food owned by this user
   isVerified      Boolean @default(false)
   isCommon        Boolean @default(false) // top 500 most-used — cached in Redis
   createdAt       DateTime @default(now())
@@ -200,10 +203,26 @@ model FoodItem {
   plannedMealItems PlannedMealItem[]
   loggedMealItems  LoggedMealItem[]
   servingSizes     ServingSize[]
+  favorites        FoodFavorite[]
 
   @@index([nameLower])
+  @@index([nameNormalized])
   @@index([barcode])
   @@index([isCommon])
+  @@index([createdByUserId])
+}
+
+model FoodFavorite {
+  id         String   @id @default(uuid())
+  userId     String
+  foodItemId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  foodItem FoodItem @relation(fields: [foodItemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, foodItemId])
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────
