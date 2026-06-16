@@ -194,19 +194,26 @@ export default function DashboardScreen() {
           ) : (
             <View className="gap-2">
               {meals.map((meal) => (
-                <Card key={meal.id} className="flex-row items-center">
-                  <Text className="text-xl mr-3">{MEAL_EMOJI[meal.mealType] ?? '🍽️'}</Text>
-                  <View className="flex-1">
-                    <Text className="text-text-primary font-medium text-sm">{meal.name}</Text>
-                    <Text className="text-text-muted text-xs mt-0.5">
-                      P: {Math.round(meal.totalProteinG)}g · C: {Math.round(meal.totalCarbsG)}g · G:{' '}
-                      {Math.round(meal.totalFatG)}g
+                <TouchableOpacity
+                  key={meal.id}
+                  activeOpacity={0.7}
+                  onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id } })}
+                >
+                  <Card className="flex-row items-center">
+                    <Text className="text-xl mr-3">{MEAL_EMOJI[meal.mealType] ?? '🍽️'}</Text>
+                    <View className="flex-1">
+                      <Text className="text-text-primary font-medium text-sm">{meal.name}</Text>
+                      <Text className="text-text-muted text-xs mt-0.5">
+                        P: {Math.round(meal.totalProteinG)}g · C: {Math.round(meal.totalCarbsG)}g · G:{' '}
+                        {Math.round(meal.totalFatG)}g
+                      </Text>
+                    </View>
+                    <Text className="text-primary font-bold text-sm mr-2">
+                      {meal.totalCalories} kcal
                     </Text>
-                  </View>
-                  <Text className="text-primary font-bold text-sm">
-                    {meal.totalCalories} kcal
-                  </Text>
-                </Card>
+                    <Text className="text-text-muted text-lg">›</Text>
+                  </Card>
+                </TouchableOpacity>
               ))}
             </View>
           )}

@@ -41,6 +41,7 @@ export default function RootLayout() {
           <Stack.Screen name="register" />
           <Stack.Screen name="onboarding" />
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="meal/[id]" options={{ presentation: 'card' }} />
         </Stack>
         <OfflineBanner />
       </View>

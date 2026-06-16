@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LogMealDto, LogMealItemDto, MealType } from './dto/log-meal.dto';
@@ -92,6 +92,120 @@ export class LogsService {
     );
 
     return this.getToday(userId);
+  }
+
+  /** Edita una comida: reemplaza sus ítems (si se envían) y/o actualiza mealType/name. */
+  async updateMeal(userId: string, mealId: string, dto: LogMealDto) {
+    const meal = await this.getOwnedMeal(userId, mealId);
+
+    const replaceItems = (dto.items && dto.items.length > 0) || dto.totalCalories != null;
+    const items = replaceItems ? await this.resolveItems(dto) : null;
+
+    await this.prisma.$transaction(async (tx) => {
+      const data: Prisma.LoggedMealUpdateInput = {};
+      if (dto.mealType) data.mealType = dto.mealType as any;
+      if (dto.name !== undefined) data.name = dto.name;
+
+      if (items) {
+        const t = this.sumItems(items);
+        data.totalCalories = t.calories;
+        data.totalProteinG = round1(t.protein);
+        data.totalCarbsG = round1(t.carbs);
+        data.totalFatG = round1(t.fat);
+        await tx.loggedMealItem.deleteMany({ where: { loggedMealId: mealId } });
+        data.items = {
+          create: items.map((i) => ({
+            foodItemId: i.foodItemId,
+            servingSizeId: i.servingSizeId,
+            nameSnapshot: i.nameSnapshot,
+            quantity: i.quantity,
+            unit: i.unit,
+            amountG: i.amountG,
+            calories: i.calories,
+            proteinG: i.proteinG,
+            carbsG: i.carbsG,
+            fatG: i.fatG,
+          })),
+        };
+      }
+
+      await tx.loggedMeal.update({ where: { id: mealId }, data });
+      await this.recalcDailyLog(tx, meal.dailyLogId);
+    });
+
+    return this.getToday(userId);
+  }
+
+  /** Borra una comida completa (cascade borra sus ítems) y recalcula el día. */
+  async deleteMeal(userId: string, mealId: string) {
+    const meal = await this.getOwnedMeal(userId, mealId);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.loggedMeal.delete({ where: { id: mealId } });
+      await this.recalcDailyLog(tx, meal.dailyLogId);
+    });
+    return this.getToday(userId);
+  }
+
+  /** Borra un ítem; si la comida queda vacía, se borra. Recalcula totales de comida y día. */
+  async deleteMealItem(userId: string, mealId: string, itemId: string) {
+    const meal = await this.getOwnedMeal(userId, mealId);
+    const item = meal.items.find((i) => i.id === itemId);
+    if (!item) throw new NotFoundException('Ítem no encontrado.');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.loggedMealItem.delete({ where: { id: itemId } });
+      const remaining = meal.items.filter((i) => i.id !== itemId);
+
+      if (remaining.length === 0) {
+        await tx.loggedMeal.delete({ where: { id: mealId } });
+      } else {
+        const totals = remaining.reduce(
+          (acc, i) => ({
+            calories: acc.calories + i.calories,
+            protein: acc.protein + Number(i.proteinG),
+            carbs: acc.carbs + Number(i.carbsG),
+            fat: acc.fat + Number(i.fatG),
+          }),
+          { calories: 0, protein: 0, carbs: 0, fat: 0 },
+        );
+        await tx.loggedMeal.update({
+          where: { id: mealId },
+          data: {
+            totalCalories: totals.calories,
+            totalProteinG: round1(totals.protein),
+            totalCarbsG: round1(totals.carbs),
+            totalFatG: round1(totals.fat),
+          },
+        });
+      }
+      await this.recalcDailyLog(tx, meal.dailyLogId);
+    });
+
+    return this.getToday(userId);
+  }
+
+  /** Carga una comida verificando que pertenezca al usuario (vía dailyLog). */
+  private async getOwnedMeal(userId: string, mealId: string) {
+    const meal = await this.prisma.loggedMeal.findUnique({
+      where: { id: mealId },
+      include: { dailyLog: true, items: true },
+    });
+    if (!meal || meal.dailyLog.userId !== userId) {
+      throw new NotFoundException('Comida no encontrada.');
+    }
+    return meal;
+  }
+
+  private sumItems(items: ResolvedItem[]) {
+    return items.reduce(
+      (acc, i) => ({
+        calories: acc.calories + i.calories,
+        protein: acc.protein + i.proteinG,
+        carbs: acc.carbs + i.carbsG,
+        fat: acc.fat + i.fatG,
+      }),
+      { calories: 0, protein: 0, carbs: 0, fat: 0 },
+    );
   }
 
   /**

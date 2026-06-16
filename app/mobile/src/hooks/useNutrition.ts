@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { nutritionApi } from '../api/nutrition';
+import { nutritionApi, UpdateMealPayload } from '../api/nutrition';
 import { GoalType } from '../types';
 
 export function useActiveGoal() {
@@ -41,6 +41,32 @@ export function useLogMeal() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: nutritionApi.logMeal,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['today'] }),
+  });
+}
+
+export function useUpdateMeal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateMealPayload }) =>
+      nutritionApi.updateMeal(id, data).then((r) => r.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['today'] }),
+  });
+}
+
+export function useDeleteMeal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => nutritionApi.deleteMeal(id).then((r) => r.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['today'] }),
+  });
+}
+
+export function useDeleteMealItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mealId, itemId }: { mealId: string; itemId: string }) =>
+      nutritionApi.deleteMealItem(mealId, itemId).then((r) => r.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['today'] }),
   });
 }

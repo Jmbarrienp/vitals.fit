@@ -74,6 +74,20 @@ export interface NutritionResult {
 // Logs
 export type MealType = 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
 
+export interface LoggedMealItem {
+  id: string;
+  foodItemId: string | null;
+  servingSizeId: string | null;
+  nameSnapshot: string;
+  quantity: number;
+  unit: string;
+  amountG: number;
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
 export interface LoggedMeal {
   id: string;
   mealType: MealType;
@@ -83,6 +97,7 @@ export interface LoggedMeal {
   totalCarbsG: number;
   totalFatG: number;
   loggedAt: string;
+  items?: LoggedMealItem[];
 }
 
 export interface DailyLog {
