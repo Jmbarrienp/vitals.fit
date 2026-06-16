@@ -125,6 +125,7 @@ export interface ProgressSummary {
   trend: 'losing' | 'gaining' | 'stable' | 'insufficient_data';
   goal: GoalType | null;
   history: WeightLog[];
+  daysTracked: number; // returned by backend (progress.service.ts)
 }
 
 // Recommendations
