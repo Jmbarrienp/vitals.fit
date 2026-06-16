@@ -1,4 +1,21 @@
+# dependencias
 node_modules/
+
+# build (Render compila desde TypeScript — dist NO debe estar en el repo)
+dist/
+
+# entornos / secretos (NUNCA commitear) — se permite .env.example
 .env
-.env.local
+.env.*
+!.env.example
+
+# llaves y credenciales
+*.pem
+*.key
+*.p12
+*.jks
+*.p8
+
+# logs
 *.log
+logs/
