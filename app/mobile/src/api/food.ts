@@ -10,6 +10,16 @@ export interface FoodItem {
   fiberPer100g: number;
   source: string;
   isCommon: boolean;
+  isFavorite?: boolean;
+}
+
+export interface CreateCustomFoodInput {
+  name: string;
+  caloriesPer100g: number;
+  proteinPer100g: number;
+  carbsPer100g: number;
+  fatPer100g: number;
+  fiberPer100g?: number;
 }
 
 export const foodApi = {
@@ -18,6 +28,24 @@ export const foodApi = {
 
   getCommon: () =>
     apiClient.get<FoodItem[]>('/food/common'),
+
+  getRecent: () =>
+    apiClient.get<FoodItem[]>('/food/recent'),
+
+  getFrequent: () =>
+    apiClient.get<FoodItem[]>('/food/frequent'),
+
+  getFavorites: () =>
+    apiClient.get<FoodItem[]>('/food/favorites'),
+
+  addFavorite: (id: string) =>
+    apiClient.post<{ ok: boolean }>(`/food/${id}/favorite`),
+
+  removeFavorite: (id: string) =>
+    apiClient.delete<{ ok: boolean }>(`/food/${id}/favorite`),
+
+  createCustom: (data: CreateCustomFoodInput) =>
+    apiClient.post<FoodItem>('/food/custom', data),
 
   findById: (id: string) =>
     apiClient.get<FoodItem>(`/food/${id}`),

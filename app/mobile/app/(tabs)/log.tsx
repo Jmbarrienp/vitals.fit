@@ -8,7 +8,10 @@ import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';
 import { useLogMeal } from '../../src/hooks/useNutrition';
-import { useFoodSearch, useCommonFoods } from '../../src/hooks/useFood';
+import {
+  useFoodSearch, useCommonFoods, useRecentFoods, useFrequentFoods,
+  useFavoriteFoods, useToggleFavorite, useCreateCustomFood,
+} from '../../src/hooks/useFood';
 import { macrosFromPortion, type FoodItem } from '../../src/api/food';
 import type { MealType } from '../../src/types';
 
@@ -27,6 +30,62 @@ const PORTIONS = [
   { label: 'Otro', value: 0 },
 ];
 
+/** Fila de alimento con macros, kcal y estrella de favorito (tap fila = seleccionar). */
+function FoodRow({
+  food, onPress, onToggleFav,
+}: {
+  food: FoodItem;
+  onPress: () => void;
+  onToggleFav: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      className="flex-row items-center py-3 border-b border-border"
+      onPress={onPress}
+    >
+      <View className="flex-1 mr-2">
+        <Text className="text-text-primary text-sm font-medium">{food.name}</Text>
+        <Text className="text-text-muted text-xs mt-0.5">
+          P:{food.proteinPer100g}g · C:{food.carbsPer100g}g · G:{food.fatPer100g}g por 100g
+        </Text>
+      </View>
+      <Text className="text-primary font-bold text-sm mr-2">{food.caloriesPer100g} kcal</Text>
+      <TouchableOpacity
+        onPress={onToggleFav}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        className="px-1"
+      >
+        <Text className="text-lg" style={{ color: food.isFavorite ? '#f59e0b' : '#475569' }}>
+          {food.isFavorite ? '★' : '☆'}
+        </Text>
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+}
+
+/** Sección de acceso rápido (Favoritos / Recientes / Frecuentes). Oculta si vacía. */
+function QuickSection({
+  title, icon, foods, onPick, onToggleFav,
+}: {
+  title: string;
+  icon: string;
+  foods?: FoodItem[];
+  onPick: (f: FoodItem) => void;
+  onToggleFav: (f: FoodItem) => void;
+}) {
+  if (!foods || foods.length === 0) return null;
+  return (
+    <View className="mb-4">
+      <Text className="text-text-secondary text-xs font-semibold uppercase tracking-wider mb-1">
+        {icon} {title}
+      </Text>
+      {foods.slice(0, 6).map((f) => (
+        <FoodRow key={f.id} food={f} onPress={() => onPick(f)} onToggleFav={() => onToggleFav(f)} />
+      ))}
+    </View>
+  );
+}
+
 export default function LogScreen() {
   const router = useRouter();
   const [mealType, setMealType] = useState<MealType>('BREAKFAST');
@@ -44,16 +103,33 @@ export default function LogScreen() {
   const [manualCarbs, setManualCarbs] = useState('');
   const [manualFat, setManualFat] = useState('');
 
+  // Custom food creator (valores por 100g)
+  const [showCustomFood, setShowCustomFood] = useState(false);
+  const [cfName, setCfName] = useState('');
+  const [cfCal, setCfCal] = useState('');
+  const [cfProtein, setCfProtein] = useState('');
+  const [cfCarbs, setCfCarbs] = useState('');
+  const [cfFat, setCfFat] = useState('');
+
   const { mutate: logMeal, isPending } = useLogMeal();
   const { data: searchResults, isFetching } = useFoodSearch(searchQuery);
   const { data: commonFoods } = useCommonFoods();
+  const { data: recentFoods } = useRecentFoods();
+  const { data: frequentFoods } = useFrequentFoods();
+  const { data: favoriteFoods } = useFavoriteFoods();
+  const { mutate: toggleFavorite } = useToggleFavorite();
+  const { mutate: createCustomFood, isPending: creatingCustom } = useCreateCustomFood();
 
-  const displayedFoods = searchQuery.trim().length >= 2 ? searchResults : commonFoods;
   const isSearching = searchQuery.trim().length >= 2 && isFetching;
+  const showResults = !selectedFood && searchQuery.trim().length >= 2;
+  const showQuickAccess = !selectedFood && searchQuery.trim().length < 2;
 
   const activePortion = showCustomPortion ? parseInt(customPortion) || 0 : portionG;
   const macros =
     selectedFood && activePortion > 0 ? macrosFromPortion(selectedFood, activePortion) : null;
+
+  const onToggleFav = (food: FoodItem) =>
+    toggleFavorite({ id: food.id, next: !food.isFavorite });
 
   const selectFood = useCallback((food: FoodItem) => {
     setSelectedFood(food);
@@ -102,16 +178,40 @@ export default function LogScreen() {
       );
       return;
     }
+    // Nuevo flujo: enviamos el ítem de catálogo; el backend calcula macros y guarda foodItemId.
     logMeal(
       {
         mealType,
-        name: `${selectedFood.name} (${activePortion}g)`,
-        totalCalories: macros!.calories,
-        totalProteinG: macros!.proteinG,
-        totalCarbsG: macros!.carbsG,
-        totalFatG: macros!.fatG,
+        name: `${selectedFood.name} (${activePortion} g)`,
+        items: [{ foodItemId: selectedFood.id, quantity: activePortion, unit: 'g' }],
       },
       { onSuccess, onError },
+    );
+  };
+
+  const handleCreateCustomFood = () => {
+    const cal = parseInt(cfCal);
+    if (!cfName.trim() || !cal || cal <= 0) {
+      Alert.alert('Faltan datos', 'Ingresa nombre y calorías por 100g.');
+      return;
+    }
+    createCustomFood(
+      {
+        name: cfName.trim(),
+        caloriesPer100g: cal,
+        proteinPer100g: parseFloat(cfProtein) || 0,
+        carbsPer100g: parseFloat(cfCarbs) || 0,
+        fatPer100g: parseFloat(cfFat) || 0,
+      },
+      {
+        onSuccess: (food) => {
+          setCfName(''); setCfCal(''); setCfProtein(''); setCfCarbs(''); setCfFat('');
+          setShowCustomFood(false);
+          setShowManual(false);
+          selectFood(food); // queda listo para elegir porción y guardar
+        },
+        onError: () => Alert.alert('Error', 'No se pudo crear el alimento.'),
+      },
     );
   };
 
@@ -238,38 +338,25 @@ export default function LogScreen() {
                   )}
                 </View>
 
-                {!selectedFood && displayedFoods && displayedFoods.length > 0 && (
+                {showResults && searchResults && searchResults.length > 0 && (
                   <View className="mt-3">
                     <Text className="text-text-muted text-xs mb-2">
-                      {searchQuery.trim().length >= 2
-                        ? `${displayedFoods.length} resultado${displayedFoods.length !== 1 ? 's' : ''}`
-                        : 'Alimentos frecuentes'}
+                      {searchResults.length} resultado{searchResults.length !== 1 ? 's' : ''}
                     </Text>
-                    {displayedFoods.slice(0, 8).map((food) => (
-                      <TouchableOpacity
+                    {searchResults.slice(0, 12).map((food) => (
+                      <FoodRow
                         key={food.id}
-                        className="flex-row items-center py-3 border-b border-border"
+                        food={food}
                         onPress={() => selectFood(food)}
-                      >
-                        <View className="flex-1">
-                          <Text className="text-text-primary text-sm font-medium">{food.name}</Text>
-                          <Text className="text-text-muted text-xs mt-0.5">
-                            P:{food.proteinPer100g}g · C:{food.carbsPer100g}g · G:{food.fatPer100g}
-                            g por 100g
-                          </Text>
-                        </View>
-                        <Text className="text-primary font-bold text-sm ml-3">
-                          {food.caloriesPer100g} kcal
-                        </Text>
-                      </TouchableOpacity>
+                        onToggleFav={() => onToggleFav(food)}
+                      />
                     ))}
                   </View>
                 )}
 
-                {!selectedFood &&
-                  searchQuery.trim().length >= 2 &&
+                {showResults &&
                   !isSearching &&
-                  (!displayedFoods || displayedFoods.length === 0) && (
+                  (!searchResults || searchResults.length === 0) && (
                     <View className="py-4 items-center">
                       <Text className="text-text-muted text-sm">
                         Sin resultados para "{searchQuery}"
@@ -280,6 +367,91 @@ export default function LogScreen() {
                     </View>
                   )}
               </Card>
+
+              {/* ── Acceso rápido: Favoritos / Recientes / Frecuentes / Comunes ── */}
+              {showQuickAccess && (
+                <Card className="mb-4">
+                  <QuickSection
+                    title="Favoritos" icon="⭐" foods={favoriteFoods}
+                    onPick={selectFood} onToggleFav={onToggleFav}
+                  />
+                  <QuickSection
+                    title="Recientes" icon="🕘" foods={recentFoods}
+                    onPick={selectFood} onToggleFav={onToggleFav}
+                  />
+                  <QuickSection
+                    title="Frecuentes" icon="🔁" foods={frequentFoods}
+                    onPick={selectFood} onToggleFav={onToggleFav}
+                  />
+                  <QuickSection
+                    title="Comunes" icon="🍽️" foods={commonFoods}
+                    onPick={selectFood} onToggleFav={onToggleFav}
+                  />
+                  <TouchableOpacity
+                    className="mt-1 py-2 items-center"
+                    onPress={() => setShowCustomFood((v) => !v)}
+                  >
+                    <Text className="text-primary text-sm font-semibold">
+                      {showCustomFood ? '× Cancelar' : '➕ Crear alimento propio'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {showCustomFood && (
+                    <View className="mt-2 pt-3 border-t border-border">
+                      <Text className="text-text-muted text-xs mb-3">
+                        Valores por cada 100g. Quedará guardado para registrarlo después.
+                      </Text>
+                      <Input
+                        label="Nombre *"
+                        value={cfName}
+                        onChangeText={setCfName}
+                        placeholder="Ej: Granola casera"
+                      />
+                      <Input
+                        label="Calorías / 100g *"
+                        value={cfCal}
+                        onChangeText={setCfCal}
+                        placeholder="471"
+                        keyboardType="numeric"
+                      />
+                      <View className="flex-row gap-3">
+                        <View className="flex-1">
+                          <Input
+                            label="Prot. / 100g"
+                            value={cfProtein}
+                            onChangeText={setCfProtein}
+                            placeholder="10"
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                        <View className="flex-1">
+                          <Input
+                            label="Carbs / 100g"
+                            value={cfCarbs}
+                            onChangeText={setCfCarbs}
+                            placeholder="64"
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                        <View className="flex-1">
+                          <Input
+                            label="Grasa / 100g"
+                            value={cfFat}
+                            onChangeText={setCfFat}
+                            placeholder="20"
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                      </View>
+                      <Button
+                        label="Crear y usar"
+                        loading={creatingCustom}
+                        onPress={handleCreateCustomFood}
+                      />
+                    </View>
+                  )}
+                </Card>
+              )}
 
               {selectedFood && (
                 <Card className="mb-4 border-primary/30">

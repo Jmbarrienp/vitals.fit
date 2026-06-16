@@ -41,7 +41,12 @@ export function useLogMeal() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: nutritionApi.logMeal,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['today'] }),
+    onSuccess: () => {
+      // Logging changes today's totals and the recent/frequent food lists.
+      ['today', 'food-recent', 'food-frequent'].forEach((k) =>
+        queryClient.invalidateQueries({ queryKey: [k] }),
+      );
+    },
   });
 }
 
