@@ -29,10 +29,9 @@ web-build/
 *.p8
 *.mobileprovision
 
-# logs
+# logs (archivos .log en cualquier nivel; NO ignorar dirs de código como src/logs)
 *.log
 **/*.log
-logs/
 
 # basura de SO / editor
 .DS_Store

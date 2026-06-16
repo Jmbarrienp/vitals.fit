@@ -16,6 +16,5 @@ dist/
 *.jks
 *.p8
 
-# logs
+# logs (NO ignorar src/logs)
 *.log
-logs/
