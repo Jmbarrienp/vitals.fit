@@ -9,7 +9,9 @@ import { registerPushToken } from '../api/push';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowAlert: true, // deprecated, kept for back-compat
+    shouldShowBanner: true, // SDK 54: heads-up banner
+    shouldShowList: true, // SDK 54: notification center
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
