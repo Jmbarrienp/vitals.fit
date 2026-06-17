@@ -11,7 +11,8 @@
     "start:debug": "nest start --debug --watch",
     "migrate:deploy": "npx prisma migrate deploy",
     "migrate:status": "npx prisma migrate status",
-    "smoke:1c": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-1c.ts"
+    "smoke:1c": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-1c.ts",
+    "smoke:state": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-state.ts"
   },
   "keywords": [],
   "author": "",

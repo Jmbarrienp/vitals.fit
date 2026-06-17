@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { GoalType, PersonaType, Sex } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NutritionStateService } from '../../nutrition-state/nutrition-state.service';
 import { RecentMeal, UserSnapshot } from '../types/user-snapshot';
 
 const PERSONA_MAP: Record<PersonaType, UserSnapshot['persona']> = {
@@ -27,61 +28,49 @@ const SEX_MAP: Record<Sex, UserSnapshot['sex']> = {
 
 @Injectable()
 export class ContextBuilderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly nutritionState: NutritionStateService,
+  ) {}
 
   async buildSnapshot(userId: string): Promise<UserSnapshot> {
     const today = startOfDay(new Date());
-    const sevenDaysAgo = startOfDay(new Date());
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const [profileData, goalData, todayLog, habitsData, last7Logs, recentWeights] =
-      await Promise.all([
-        this.prisma.userProfile.findUnique({
-          where: { userId },
-          select: { persona: true, sex: true },
-        }),
-        this.prisma.goal.findFirst({
-          where: { userId, isActive: true },
-          orderBy: { createdAt: 'desc' },
-          select: {
-            type: true,
-            targetCalories: true,
-            proteinG: true,
-            carbsG: true,
-            fatG: true,
-            tdee: true,
+    // Today's intake + goal targets stay real-time; the longitudinal fields
+    // (adherence 7d, weight trend, streak) come from the cached state.
+    const [profileData, goalData, todayLog, state] = await Promise.all([
+      this.prisma.userProfile.findUnique({
+        where: { userId },
+        select: { persona: true, sex: true },
+      }),
+      this.prisma.goal.findFirst({
+        where: { userId, isActive: true },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          type: true,
+          targetCalories: true,
+          proteinG: true,
+          carbsG: true,
+          fatG: true,
+          tdee: true,
+        },
+      }),
+      this.prisma.dailyLog.findUnique({
+        where: { userId_date: { userId, date: today } },
+        select: {
+          caloriesLogged: true,
+          proteinG: true,
+          carbsG: true,
+          fatG: true,
+          loggedMeals: {
+            select: { name: true, totalCalories: true, mealType: true },
+            orderBy: { loggedAt: 'desc' },
+            take: 3,
           },
-        }),
-        this.prisma.dailyLog.findUnique({
-          where: { userId_date: { userId, date: today } },
-          select: {
-            caloriesLogged: true,
-            proteinG: true,
-            carbsG: true,
-            fatG: true,
-            loggedMeals: {
-              select: { name: true, totalCalories: true, mealType: true },
-              orderBy: { loggedAt: 'desc' },
-              take: 3,
-            },
-          },
-        }),
-        this.prisma.userHabits.findUnique({
-          where: { userId },
-          select: { currentStreak: true },
-        }),
-        this.prisma.dailyLog.findMany({
-          where: { userId, date: { gte: sevenDaysAgo } },
-          select: { adherencePct: true, planFollowed: true },
-          orderBy: { date: 'desc' },
-        }),
-        this.prisma.weightLog.findMany({
-          where: { userId },
-          orderBy: { date: 'desc' },
-          take: 2,
-          select: { weightKg: true },
-        }),
-      ]);
+        },
+      }),
+      this.nutritionState.get(userId),
+    ]);
 
     const personaKey = profileData?.persona ?? PersonaType.PRINCIPIANTE_MOTIVADO;
     const goalKey = goalData?.type ?? GoalType.MAINTAIN;
@@ -114,11 +103,12 @@ export class ContextBuilderService {
         recentMeals,
       },
       progress: {
-        weightTrendKg: computeWeightTrend(recentWeights),
-        adherencePct7d: computeAdherence(last7Logs),
+        // weeklyRate from the shared least-squares helper (was a 2-point diff).
+        weightTrendKg: state.weightTrendKgWk,
+        adherencePct7d: state.adherencePct7d ?? 0,
       },
       streak: {
-        currentDays: habitsData?.currentStreak ?? 0,
+        currentDays: state.loggingStreak,
       },
     };
   }
@@ -127,21 +117,4 @@ export class ContextBuilderService {
 function startOfDay(date: Date): Date {
   date.setHours(0, 0, 0, 0);
   return date;
-}
-
-function computeAdherence(
-  logs: Array<{ adherencePct: number | null; planFollowed: boolean | null }>,
-): number {
-  const evaluated = logs.filter((l) => l.planFollowed !== null);
-  if (evaluated.length === 0) return 0;
-  const sum = evaluated.reduce((acc, l) => {
-    if (l.adherencePct !== null) return acc + l.adherencePct * 100;
-    return acc + (l.planFollowed ? 100 : 0);
-  }, 0);
-  return Math.round(sum / evaluated.length);
-}
-
-function computeWeightTrend(weights: Array<{ weightKg: number }>): number | null {
-  if (weights.length < 2) return null;
-  return Math.round((weights[0].weightKg - weights[1].weightKg) * 10) / 10;
 }

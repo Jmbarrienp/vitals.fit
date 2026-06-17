@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LogWeightDto } from './dto/log-weight.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WeightUpdatedEvent } from '../orchestrator/events/progress.event';
+import { computeWeightTrend } from '../common/metrics/weight-trend';
 
 @Injectable()
 export class ProgressService {
@@ -73,11 +74,13 @@ export class ProgressService {
     const last = logs[logs.length - 1];
     const totalChange = Math.round((last.weightKg - first.weightKg) * 10) / 10;
     const days = Math.max(1, Math.round((last.date.getTime() - first.date.getTime()) / (1000 * 60 * 60 * 24)));
-    const weeklyRate = Math.round((totalChange / days) * 7 * 100) / 100;
 
-    // Simple trend: linear regression slope
+    // Weekly rate via the shared least-squares helper (single source of truth).
+    const fit = computeWeightTrend(logs.map((l) => ({ date: l.date, weightKg: l.weightKg })));
+    const weeklyRate = fit.weeklyRateKg ?? 0;
+
     let trend = 'insufficient_data';
-    if (logs.length >= 3) {
+    if (logs.length >= 3 && fit.weeklyRateKg !== null) {
       if (weeklyRate < -0.3) trend = 'losing';
       else if (weeklyRate > 0.2) trend = 'gaining';
       else trend = 'stable';
