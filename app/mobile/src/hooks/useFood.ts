@@ -43,17 +43,31 @@ export function useFavoriteFoods() {
   });
 }
 
-/** Optimistic favorite toggle; invalidates every list that shows the star. */
+// Lists whose rows carry the ⭐ flag; flipped optimistically so the tap feels instant.
+const STAR_LISTS = ['food-search', 'food-common', 'food-recent', 'food-frequent'];
+
+/** Optimistic favorite toggle: flips the star instantly, reconciles favorites on settle. */
 export function useToggleFavorite() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, next }: { id: string; next: boolean }) =>
       (next ? foodApi.addFavorite(id) : foodApi.removeFavorite(id)).then((r) => r.data),
-    onSettled: () => {
-      ['food-favorites', 'food-recent', 'food-frequent', 'food-common', 'food-search'].forEach(
-        (k) => qc.invalidateQueries({ queryKey: [k] }),
-      );
+    onMutate: async ({ id, next }) => {
+      // Stop in-flight refetches from clobbering the optimistic state.
+      await Promise.all(STAR_LISTS.map((k) => qc.cancelQueries({ queryKey: [k] })));
+      const snapshot = STAR_LISTS.flatMap((k) => qc.getQueriesData<FoodItem[]>({ queryKey: [k] }));
+      for (const k of STAR_LISTS) {
+        qc.setQueriesData<FoodItem[]>({ queryKey: [k] }, (old) =>
+          old?.map((f) => (f.id === id ? { ...f, isFavorite: next } : f)),
+        );
+      }
+      return { snapshot };
     },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshot.forEach(([key, data]) => qc.setQueryData(key, data));
+    },
+    // Only the Favoritos list changes membership; the star flags are already correct.
+    onSettled: () => qc.invalidateQueries({ queryKey: ['food-favorites'] }),
   });
 }
 
