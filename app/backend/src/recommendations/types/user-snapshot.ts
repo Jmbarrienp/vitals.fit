@@ -1,3 +1,5 @@
+import { BehaviorFlag, PlateauStatus } from '@prisma/client';
+
 export interface RecentMeal {
   name: string;
   calories: number;
@@ -30,5 +32,13 @@ export interface UserSnapshot {
   };
   streak: {
     currentDays: number;
+  };
+  // Derived longitudinal state — read-only consumers, computed in the rollup.
+  state: {
+    adherenceScore: number | null;
+    nutritionScore: number | null;
+    plateauStatus: PlateauStatus;
+    behaviorFlags: BehaviorFlag[];
+    trendStatus: string | null;
   };
 }

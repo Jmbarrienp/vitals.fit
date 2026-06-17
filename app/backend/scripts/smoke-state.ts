@@ -117,7 +117,8 @@ async function main() {
   check('nuevo: avgCalories7d=null', s0.avgCalories7d === null);
   check('nuevo: trendStatus=insufficient_data', s0.trendStatus === 'insufficient_data');
   check('nuevo: snapshot de meta (target 1900)', s0.goalType === 'LOSE_FAT' && s0.calorieTarget === 1900);
-  check('nuevo: stale=false, version=1 tras recompute', s0.stale === false && s0.version === 1);
+  check('nuevo: stale=false, version=2 tras recompute', s0.stale === false && s0.version === 2);
+  check('nuevo: scores null, plateau INSUFFICIENT_DATA, sin flags', s0.adherenceScore === null && s0.nutritionScore === null && s0.plateauStatus === 'INSUFFICIENT_DATA' && s0.behaviorFlags.length === 0);
 
   // 2. Insertar 4 días logueados (dentro de 7d) con 2 comidas c/u + streak
   await prisma.userHabits.create({ data: { userId: uid, currentStreak: 4 } });
@@ -154,6 +155,60 @@ async function main() {
   check('peso: weightTrendKgWk negativo', (s2.weightTrendKgWk ?? 0) < 0, `rate=${s2.weightTrendKgWk}`);
   check('peso: currentWeightKg=79.3 (último)', s2.currentWeightKg === 79.3, `got ${s2.currentWeightKg}`);
   check('peso: trendStatus=on_track (LOSE_FAT bajando)', s2.trendStatus === 'on_track', `got ${s2.trendStatus}`);
+
+  // ── 2A.2 estado derivado ──
+  console.log('\n── ESTADO DERIVADO (2A.2) ──');
+  check('version bump a 2', s2.version === 2, `v=${s2.version}`);
+  check('adherenceScore=67 (4/7 días, streak 4, adherencia 90)', s2.adherenceScore === 67, `got ${s2.adherenceScore}`);
+  check('nutritionScore=90 (1850 vs 1900, prot 125/150)', s2.nutritionScore === 90, `got ${s2.nutritionScore}`);
+  check('flag BREAKFAST_SKIPPED (solo lunch/dinner)', s2.behaviorFlags.includes('BREAKFAST_SKIPPED' as any));
+  check('NO flag PROTEIN_CHRONIC_LOW (proteína adecuada)', !s2.behaviorFlags.includes('PROTEIN_CHRONIC_LOW' as any));
+  check('plateau NONE (bajando, no estancado)', s2.plateauStatus === 'NONE', `got ${s2.plateauStatus}`);
+
+  // PROTEIN_CHRONIC_LOW: proteína muy baja vs target
+  const pUser = await prisma.user.create({ data: { email: 'protein@test.local' } });
+  await prisma.goal.create({
+    data: { userId: pUser.id, type: 'LOSE_FAT', targetCalories: 1900, proteinG: 150, carbsG: 180, fatG: 60, fiberTargetG: 30, waterMl: 2500, bmr: 1500, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: -300 },
+  });
+  for (const d of [1, 2, 3, 4]) {
+    await prisma.dailyLog.create({
+      data: {
+        userId: pUser.id, date: daysAgo(d), caloriesLogged: 1800, proteinG: 50, planFollowed: true, adherencePct: 0.8,
+        loggedMeals: { create: [
+          { mealType: 'BREAKFAST', totalCalories: 600, totalProteinG: 20, totalCarbsG: 50, totalFatG: 15 },
+          { mealType: 'LUNCH', totalCalories: 1200, totalProteinG: 30, totalCarbsG: 80, totalFatG: 30 },
+        ] },
+      },
+    });
+  }
+  const sP = await state.recompute(pUser.id);
+  check('flag PROTEIN_CHRONIC_LOW (50g vs 150g)', sP.behaviorFlags.includes('PROTEIN_CHRONIC_LOW' as any));
+  check('NO flag BREAKFAST_SKIPPED (desayuno logueado)', !sP.behaviorFlags.includes('BREAKFAST_SKIPPED' as any));
+
+  // PLATEAU_SUSPECTED: LOSE_FAT + adherencia alta + peso plano
+  const plUser = await prisma.user.create({ data: { email: 'plateau@test.local' } });
+  await prisma.goal.create({
+    data: { userId: plUser.id, type: 'LOSE_FAT', targetCalories: 1900, proteinG: 150, carbsG: 180, fatG: 60, fiberTargetG: 30, waterMl: 2500, bmr: 1500, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: -300 },
+  });
+  await prisma.userHabits.create({ data: { userId: plUser.id, currentStreak: 7 } });
+  for (const d of [1, 2, 3, 4, 5, 6]) {
+    await prisma.dailyLog.create({
+      data: {
+        userId: plUser.id, date: daysAgo(d), caloriesLogged: 1850, proteinG: 140, planFollowed: true, adherencePct: 1.0,
+        loggedMeals: { create: [
+          { mealType: 'BREAKFAST', totalCalories: 500, totalProteinG: 40, totalCarbsG: 40, totalFatG: 15 },
+          { mealType: 'LUNCH', totalCalories: 1350, totalProteinG: 100, totalCarbsG: 120, totalFatG: 40 },
+        ] },
+      },
+    });
+  }
+  for (const [d, kg] of [[21, 80], [14, 80.1], [7, 79.9], [1, 80.0]] as const) {
+    await prisma.weightLog.create({ data: { userId: plUser.id, date: daysAgo(d), weightKg: kg } });
+  }
+  const sPl = await state.recompute(plUser.id);
+  check('plateau: trendStatus=stalled (peso plano)', sPl.trendStatus === 'stalled', `got ${sPl.trendStatus}`);
+  check('plateau: adherenceScore alto (>=70)', (sPl.adherenceScore ?? 0) >= 70, `score=${sPl.adherenceScore}`);
+  check('plateau: PLATEAU_SUSPECTED', sPl.plateauStatus === 'PLATEAU_SUSPECTED', `got ${sPl.plateauStatus}`);
 
   // 4. Stale flow: markStale marca stale; get() recomputa y deja stale=false
   await state.recompute(uid);

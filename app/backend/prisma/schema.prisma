@@ -94,6 +94,21 @@ model UserHabits {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// Strongly-typed habit signals (Phase 2A.2). Avoids free-form string arrays so
+// consumers (rules, mobile, future Claude) never diverge on spelling/meaning.
+enum BehaviorFlag {
+  PROTEIN_CHRONIC_LOW      // avg protein well under target across logged days
+  LOW_LOGGING_CONSISTENCY  // logged < half the days in the 7d window
+  WEEKEND_OVEREATING       // weekend avg calories materially above weekdays
+  BREAKFAST_SKIPPED        // breakfast missing on most logged days
+}
+
+enum PlateauStatus {
+  INSUFFICIENT_DATA
+  NONE
+  PLATEAU_SUSPECTED // weight-loss goal + high adherence + flat trend
+}
+
 // Cached, deterministic longitudinal state per user — the keystone for
 // state-aware recommendations (and later Claude). Recomputed lazily (stale flag
 // + 12h TTL); no background worker (Render Free). Holds NO AI output.
@@ -129,6 +144,12 @@ model UserNutritionState {
   weightTrendKgWk  Float?
   weightDataPoints Int    @default(0)
   trendStatus      String? // on_track | stalled | regressing | insufficient_data
+
+  // ── Phase 2A.2: derived state (computed ONLY in recompute(), consumed everywhere) ──
+  adherenceScore Int?           // 0..100 — behavioral consistency (logging + plan)
+  nutritionScore Int?           // 0..100 — intake quality vs goal targets
+  plateauStatus  PlateauStatus  @default(INSUFFICIENT_DATA)
+  behaviorFlags  BehaviorFlag[]
 
   updatedAt DateTime @updatedAt
 

@@ -110,6 +110,13 @@ export class ContextBuilderService {
       streak: {
         currentDays: state.loggingStreak,
       },
+      state: {
+        adherenceScore: state.adherenceScore,
+        nutritionScore: state.nutritionScore,
+        plateauStatus: state.plateauStatus,
+        behaviorFlags: state.behaviorFlags,
+        trendStatus: state.trendStatus,
+      },
     };
   }
 }

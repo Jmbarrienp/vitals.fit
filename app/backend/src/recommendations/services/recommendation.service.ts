@@ -4,6 +4,7 @@ import { AnthropicService } from '../../ai/services/anthropic.service';
 import { PromptBuilderService } from '../../ai/services/prompt-builder.service';
 import { ParserService } from '../../ai/services/parser.service';
 import { TelemetryService } from '../../ai/services/telemetry.service';
+import { BehaviorFlag, PlateauStatus } from '@prisma/client';
 import { ContextBuilderService } from './context-builder.service';
 import { UserSnapshot } from '../types/user-snapshot';
 
@@ -112,6 +113,11 @@ function rulesEngine(snap: UserSnapshot): string {
   const meals = snap.today.mealsLogged;
   const streak = snap.streak.currentDays;
   const pct = calTarget > 0 ? Math.round((calLogged / calTarget) * 100) : 0;
+  const flags = snap.state.behaviorFlags;
+
+  // ── V2 insight (highest value, rare): real plateau. Pure consumer of the rollup. ──
+  if (snap.state.plateauStatus === PlateauStatus.PLATEAU_SUSPECTED)
+    return 'Tu adherencia viene alta pero tu peso lleva días plano. Suele ser un plateau normal — probablemente toque ajustar calorías, no esforzarte más.';
 
   if (meals === 0) return 'Empieza registrando el desayuno — los primeros datos del día son los más importantes.';
   if (calLogged > calTarget + 200) return `Hoy te pasaste ${calLogged - calTarget} kcal de tu meta. Sin drama — mañana retomas el plan.`;
@@ -124,6 +130,17 @@ function rulesEngine(snap: UserSnapshot): string {
   if (snap.progress.adherencePct7d < 40) return 'Esta semana fue difícil. No necesitas ser perfecto — solo registrar un poco cada día ya ayuda.';
   if (snap.progress.weightTrendKg !== null && snap.goal === 'lose' && snap.progress.weightTrendKg < -0.1)
     return 'Tus datos muestran progreso en la dirección correcta. Sigue así.';
+
+  // ── V2 habit insights (consumers of behaviorFlags) — beat the generic fallback ──
+  if (flags.includes(BehaviorFlag.PROTEIN_CHRONIC_LOW))
+    return 'Vienes varios días por debajo de tu proteína objetivo. Subirla un poco protege tu músculo mientras avanzas.';
+  if (flags.includes(BehaviorFlag.WEEKEND_OVEREATING))
+    return 'Tus fines de semana suman bastante más que tus días de semana. Planear sábado y domingo puede ser el ajuste que falta.';
+  if (flags.includes(BehaviorFlag.BREAKFAST_SKIPPED))
+    return 'Vienes saltándote el desayuno casi siempre. Si llegas con hambre en la tarde, un desayuno con proteína ayuda a controlar el resto del día.';
+  if (flags.includes(BehaviorFlag.LOW_LOGGING_CONSISTENCY))
+    return 'Esta semana registraste pocos días. No busques perfección — registrar aunque sea una comida al día mantiene tus datos vivos.';
+
   return `Llevas ${calLogged} de ${calTarget} kcal hoy (${pct}%). Vas bien.`;
 }
 
@@ -137,5 +154,10 @@ function toCompactSnapshot(snap: UserSnapshot): Record<string, unknown> {
     streak: snap.streak.currentDays,
     adherence7d: snap.progress.adherencePct7d,
     weightTrend: snap.progress.weightTrendKg,
+    adherenceScore: snap.state.adherenceScore,
+    nutritionScore: snap.state.nutritionScore,
+    plateauStatus: snap.state.plateauStatus,
+    behaviorFlags: snap.state.behaviorFlags,
+    trendStatus: snap.state.trendStatus,
   };
 }
