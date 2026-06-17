@@ -1,16 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import { Priority, RecommendationType } from '@prisma/client';
 import { AnthropicService } from '../../ai/services/anthropic.service';
 import { PromptBuilderService } from '../../ai/services/prompt-builder.service';
 import { ParserService } from '../../ai/services/parser.service';
 import { TelemetryService } from '../../ai/services/telemetry.service';
-import { BehaviorFlag, PlateauStatus } from '@prisma/client';
 import { ContextBuilderService } from './context-builder.service';
+import { decideNudge } from './recommendation-engine';
+import { RecommendationInput, RecommendationReason } from '../recommendation-reason';
 import { UserSnapshot } from '../types/user-snapshot';
+
+/** What the listener persists + pushes: text plus its structured classification. */
+export interface GeneratedRecommendation {
+  text: string;
+  reason: RecommendationReason;
+  type: RecommendationType;
+  priority: Priority;
+}
 
 @Injectable()
 export class RecommendationService {
-  private static readonly FALLBACK = 'Sigue manteniendo tus macros del día.';
   private static readonly MAX_TOKENS = 250;
   private readonly logger = new Logger(RecommendationService.name);
 
@@ -22,7 +31,7 @@ export class RecommendationService {
     private readonly telemetry: TelemetryService,
   ) {}
 
-  async generateForUser(userId: string, trigger: string): Promise<string> {
+  async generateForUser(userId: string, trigger: string): Promise<GeneratedRecommendation> {
     const startMs = Date.now();
 
     let snap: UserSnapshot | undefined;
@@ -31,17 +40,20 @@ export class RecommendationService {
     let cacheHit = false;
     let fallbackUsed = false;
     let errorType: string | undefined;
-    let result = RecommendationService.FALLBACK;
+    // Deterministic structured decision — also the fallback when Claude is off/failing.
+    let decided = decideNudge(neutralInput());
+    let text = decided.message;
     let success = false;
 
     try {
       snap = await this.contextBuilder.buildSnapshot(userId);
+      decided = decideNudge(snapshotToInput(snap));
+      text = decided.message;
 
       if (!this.anthropic.hasKey) {
-        // No API key — use local rules engine (free, swap to Claude on launch)
-        result = rulesEngine(snap);
+        // No API key — ship the deterministic rule (free, swap to Claude on launch).
         success = true;
-        return result;
+        return this.result(decided, text);
       }
 
       const systemPrompt = this.promptBuilder.getSystemPrompt();
@@ -56,10 +68,11 @@ export class RecommendationService {
 
       outputTokens = response.usage.outputTokens;
       cacheHit = response.usage.cacheReadTokens > 0;
-      result = this.parser.clean(response.text);
+      // Claude phrases it; the structured reason/type/priority stay deterministic.
+      text = this.parser.clean(response.text);
       success = true;
 
-      return result;
+      return this.result(decided, text);
     } catch (err) {
       const isTransient =
         err instanceof Anthropic.APIConnectionError ||
@@ -71,18 +84,18 @@ export class RecommendationService {
       fallbackUsed = isTransient;
 
       if (!isTransient) throw err;
-      return result; // FALLBACK
+      return this.result(decided, decided.message); // deterministic fallback
     } finally {
       const latencyMs = Date.now() - startMs;
 
       if (success) {
         this.logger.log(
-          `userId=${userId} trigger=${trigger} latency=${latencyMs}ms ` +
+          `userId=${userId} trigger=${trigger} reason=${decided.reason} latency=${latencyMs}ms ` +
             `tokens=${outputTokens} cache=${cacheHit} success=true`,
         );
       } else {
         this.logger.warn(
-          `userId=${userId} trigger=${trigger} fallback=${fallbackUsed} ` +
+          `userId=${userId} trigger=${trigger} reason=${decided.reason} fallback=${fallbackUsed} ` +
             `error=${errorType ?? 'none'} latency=${latencyMs}ms`,
         );
       }
@@ -97,55 +110,67 @@ export class RecommendationService {
         inputTokenApprox,
         outputTokens,
         cacheHit,
-        compactSnapshot: snap ? toCompactSnapshot(snap) : undefined,
-        finalRecommendation: success || fallbackUsed ? result.slice(0, 200) : undefined,
+        compactSnapshot: snap ? toCompactSnapshot(snap, decided.reason) : undefined,
+        finalRecommendation: success || fallbackUsed ? text.slice(0, 200) : undefined,
         errorType,
       });
     }
   }
+
+  private result(
+    decided: { reason: RecommendationReason; type: RecommendationType; priority: Priority },
+    text: string,
+  ): GeneratedRecommendation {
+    return { text, reason: decided.reason, type: decided.type, priority: decided.priority };
+  }
 }
 
-function rulesEngine(snap: UserSnapshot): string {
-  const calLogged = snap.today.caloriesLogged;
-  const calTarget = snap.targets.calories;
-  const calRemaining = calTarget - calLogged;
-  const protRemaining = Math.round(snap.targets.proteinG - snap.today.proteinG);
-  const meals = snap.today.mealsLogged;
-  const streak = snap.streak.currentDays;
-  const pct = calTarget > 0 ? Math.round((calLogged / calTarget) * 100) : 0;
-  const flags = snap.state.behaviorFlags;
-
-  // ── V2 insight (highest value, rare): real plateau. Pure consumer of the rollup. ──
-  if (snap.state.plateauStatus === PlateauStatus.PLATEAU_SUSPECTED)
-    return 'Tu adherencia viene alta pero tu peso lleva días plano. Suele ser un plateau normal — probablemente toque ajustar calorías, no esforzarte más.';
-
-  if (meals === 0) return 'Empieza registrando el desayuno — los primeros datos del día son los más importantes.';
-  if (calLogged > calTarget + 200) return `Hoy te pasaste ${calLogged - calTarget} kcal de tu meta. Sin drama — mañana retomas el plan.`;
-  if (calLogged > calTarget) return `Llegaste a tu meta calórica por hoy. Buen trabajo.`;
-  if (pct >= 85 && meals >= 3) return `Estás al ${pct}% de tu meta. Casi llegas — una comida pequeña puede completar el día.`;
-  if (protRemaining > 40) return `Te faltan ${protRemaining}g de proteína para hoy. Agrega una fuente proteica en tu próxima comida.`;
-  if (calRemaining > 500 && meals >= 3) return `Llevas ${meals} comidas pero te quedan ${calRemaining} kcal. Considera un snack proteico.`;
-  if (streak >= 14) return `${streak} días seguidos. Eso ya no es motivación — es un hábito.`;
-  if (streak >= 7) return `Una semana completa trackeando. La consistencia es lo que más importa.`;
-  if (snap.progress.adherencePct7d < 40) return 'Esta semana fue difícil. No necesitas ser perfecto — solo registrar un poco cada día ya ayuda.';
-  if (snap.progress.weightTrendKg !== null && snap.goal === 'lose' && snap.progress.weightTrendKg < -0.1)
-    return 'Tus datos muestran progreso en la dirección correcta. Sigue así.';
-
-  // ── V2 habit insights (consumers of behaviorFlags) — beat the generic fallback ──
-  if (flags.includes(BehaviorFlag.PROTEIN_CHRONIC_LOW))
-    return 'Vienes varios días por debajo de tu proteína objetivo. Subirla un poco protege tu músculo mientras avanzas.';
-  if (flags.includes(BehaviorFlag.WEEKEND_OVEREATING))
-    return 'Tus fines de semana suman bastante más que tus días de semana. Planear sábado y domingo puede ser el ajuste que falta.';
-  if (flags.includes(BehaviorFlag.BREAKFAST_SKIPPED))
-    return 'Vienes saltándote el desayuno casi siempre. Si llegas con hambre en la tarde, un desayuno con proteína ayuda a controlar el resto del día.';
-  if (flags.includes(BehaviorFlag.LOW_LOGGING_CONSISTENCY))
-    return 'Esta semana registraste pocos días. No busques perfección — registrar aunque sea una comida al día mantiene tus datos vivos.';
-
-  return `Llevas ${calLogged} de ${calTarget} kcal hoy (${pct}%). Vas bien.`;
-}
-
-function toCompactSnapshot(snap: UserSnapshot): Record<string, unknown> {
+/** UserSnapshot → engine input. The snapshot already carries rollup-sourced state. */
+export function snapshotToInput(snap: UserSnapshot): RecommendationInput {
   return {
+    goal: snap.goal,
+    targets: { calories: snap.targets.calories, proteinG: snap.targets.proteinG },
+    today: {
+      caloriesLogged: snap.today.caloriesLogged,
+      proteinG: snap.today.proteinG,
+      mealsLogged: snap.today.mealsLogged,
+    },
+    state: {
+      plateauStatus: snap.state.plateauStatus,
+      behaviorFlags: snap.state.behaviorFlags,
+      trendStatus: snap.state.trendStatus,
+      adherenceScore: snap.state.adherenceScore,
+      adherencePct7d: snap.progress.adherencePct7d,
+      loggingStreak: snap.streak.currentDays,
+      weightTrendKgWk: snap.progress.weightTrendKg,
+      // The nudge channel never makes a plan change, so weight-point count is moot here.
+      weightDataPoints: snap.progress.weightTrendKg === null ? 0 : 3,
+    },
+  };
+}
+
+/** Empty-state input so a decision (STEADY) exists even before the snapshot loads. */
+function neutralInput(): RecommendationInput {
+  return {
+    goal: 'maintain',
+    targets: { calories: 2000, proteinG: 150 },
+    today: { caloriesLogged: 0, proteinG: 0, mealsLogged: 0 },
+    state: {
+      plateauStatus: 'INSUFFICIENT_DATA',
+      behaviorFlags: [],
+      trendStatus: null,
+      adherenceScore: null,
+      adherencePct7d: 100,
+      loggingStreak: 0,
+      weightTrendKgWk: null,
+      weightDataPoints: 0,
+    },
+  };
+}
+
+function toCompactSnapshot(snap: UserSnapshot, reason: RecommendationReason): Record<string, unknown> {
+  return {
+    reason,
     goal: snap.goal,
     persona: snap.persona,
     calRemaining: snap.targets.calories - snap.today.caloriesLogged,

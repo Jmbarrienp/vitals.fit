@@ -515,7 +515,8 @@ model Recommendation {
   userId               String
   type                 RecommendationType
   priority             Priority
-  trigger              String               // "stalled_progress" | "low_adherence" | ...
+  trigger              String               // event source: "meal.logged" | "weight.updated" | "recommendations.generate"
+  reason               String?              // structured RecommendationReason code (single writer: the engine)
   progressStatus       String?              // "on_track" | "stalled" | "regressing"
   planChange           Boolean              @default(false)
   calorieAdjustment    Int?

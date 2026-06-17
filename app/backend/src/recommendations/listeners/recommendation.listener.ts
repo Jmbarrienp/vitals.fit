@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { Priority, RecommendationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExpoPushService } from '../../push/services/expo-push.service';
 import { RecommendationService } from '../services/recommendation.service';
@@ -37,7 +36,8 @@ export class RecommendationListener {
 
     this.logger.log(`[meal.logged] userId=${event.userId} mealId=${event.mealId}`);
 
-    const text = await this.recommendation.generateForUser(event.userId, 'meal.logged');
+    const rec = await this.recommendation.generateForUser(event.userId, 'meal.logged');
+    const text = rec.text;
 
     // Message dedupe: skip if the same message prefix was sent in the last 24h
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -58,9 +58,10 @@ export class RecommendationListener {
     await this.prisma.recommendation.create({
       data: {
         userId: event.userId,
-        type: RecommendationType.BEHAVIOR_RECOMMENDATION,
-        priority: Priority.MEDIUM,
+        type: rec.type,
+        priority: rec.priority,
         trigger: 'meal.logged',
+        reason: rec.reason,
         messageForUser: text,
       },
     });
@@ -68,6 +69,6 @@ export class RecommendationListener {
     // Fire-and-forget — nunca bloquea el handler
     this.expoPush.sendToUser(event.userId, 'Vitals Fit', text, 'meal.logged');
 
-    this.logger.log(`[meal.logged] recomendación generada: ${text.slice(0, 80)}`);
+    this.logger.log(`[meal.logged] reason=${rec.reason} — ${text.slice(0, 80)}`);
   }
 }
