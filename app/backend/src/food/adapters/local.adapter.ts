@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FoodAdapter, NormalizedFood } from './food-adapter.interface';
 
+// A food must be logged at least this many times to count as "frequent"
+// (otherwise a single log would duplicate it into both Recents and Frequents).
+const MIN_FREQUENT_COUNT = 3;
+
 /** Accent-stripped, lowercased form for accent/typo-insensitive matching. */
 export function normalizeFood(s: string): string {
   return s
@@ -156,6 +160,7 @@ export class LocalFoodAdapter implements FoodAdapter {
         loggedMeal: { dailyLog: { userId }, loggedAt: { gte: since } },
       },
       _count: { foodItemId: true },
+      having: { foodItemId: { _count: { gte: MIN_FREQUENT_COUNT } } },
       orderBy: { _count: { foodItemId: 'desc' } },
       take: limit,
     });

@@ -155,10 +155,13 @@ async function main() {
   const recent = await food.getRecent(uid);
   check('getRecent incluye Pechuga de pollo', recent.some((f) => f.id === ids['Pechuga de pollo']));
 
-  // 7. Frecuentes: registrar otra vez y verificar conteo
+  // 7. Frecuentes: requiere umbral mínimo de registros (no aparece con pocos).
   await logs.logMeal(uid, { mealType: 'DINNER', items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 100, unit: 'g' }] } as any);
-  const frequent = await food.getFrequent(uid);
-  check('getFrequent incluye Pechuga de pollo', frequent.some((f) => f.id === ids['Pechuga de pollo']));
+  const frequentAt2 = await food.getFrequent(uid); // pollo lleva 2 registros
+  check('getFrequent NO incluye pollo con 2 registros (bajo umbral)', !frequentAt2.some((f) => f.id === ids['Pechuga de pollo']));
+  await logs.logMeal(uid, { mealType: 'SNACK', items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 50, unit: 'g' }] } as any);
+  const frequent = await food.getFrequent(uid); // pollo llega a 3 registros
+  check('getFrequent incluye pollo al alcanzar el umbral (3)', frequent.some((f) => f.id === ids['Pechuga de pollo']));
 
   // 8. Custom food: crear, buscar y registrar
   const custom = await food.createCustom(uid, {
