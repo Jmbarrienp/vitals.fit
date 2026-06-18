@@ -6,6 +6,9 @@ import { Card } from '../../src/components/Card';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { EmptyState } from '../../src/components/EmptyState';
 import { ErrorState } from '../../src/components/ErrorState';
+import { WeeklySummaryCard } from '../../src/components/WeeklySummaryCard';
+import { useIntelligence } from '../../src/hooks/useIntelligence';
+import { reasonLabel } from '../../src/lib/intelligence';
 import type { Recommendation } from '../../src/types';
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -45,10 +48,14 @@ export default function RecommendationsScreen() {
     queryFn: () => recommendationsApi.getHistory().then((r) => r.data),
     retry: 1,
   });
+  const { data: intel, refetch: refetchIntel } = useIntelligence();
+
+  const showWeekly =
+    !!intel && (intel.weekly.daysLogged7d > 0 || intel.topRecommendation !== null);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), refetchIntel()]);
     setRefreshing(false);
   };
 
@@ -67,6 +74,9 @@ export default function RecommendationsScreen() {
         <Text className="text-text-muted text-sm mb-6">
           Lo que el sistema aprendió de tus datos.
         </Text>
+
+        {/* ── Weekly summary (backend-derived intelligence) ── */}
+        {showWeekly && intel && <WeeklySummaryCard snapshot={intel} />}
 
         {isError && (
           <Card>
@@ -106,6 +116,11 @@ export default function RecommendationsScreen() {
                       }}
                     />
                     <View className="flex-1">
+                      {reasonLabel(rec.reason) && (
+                        <Text className="text-text-muted text-xs uppercase tracking-wider mb-1">
+                          {reasonLabel(rec.reason)}
+                        </Text>
+                      )}
                       <Text className="text-text-primary text-sm leading-5">
                         {rec.messageForUser}
                       </Text>

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BehaviorFlag, GoalType, PlateauStatus, UserNutritionState } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeWeightTrend } from '../common/metrics/weight-trend';
+import { IntelligenceSnapshot } from './types/intelligence-snapshot';
 
 /** Bump to invalidate every cached state on its next read (no migration needed). */
 export const CURRENT_STATE_VERSION = 2; // 2A.2: scores + flags + plateau
@@ -41,6 +42,46 @@ export class NutritionStateService {
    */
   async markStale(userId: string): Promise<void> {
     await this.prisma.userNutritionState.updateMany({ where: { userId }, data: { stale: true } });
+  }
+
+  /**
+   * Compact, read-only projection for the mobile intelligence surface. Reads the
+   * rollup (lazily fresh via get()) + the latest recommendation. Pure projection
+   * — no metric is recomputed here. This is what the UI renders.
+   */
+  async getIntelligenceSnapshot(userId: string): Promise<IntelligenceSnapshot> {
+    const [state, topRec] = await Promise.all([
+      this.get(userId),
+      this.prisma.recommendation.findFirst({
+        where: { userId, status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+        select: { reason: true, messageForUser: true, type: true, priority: true },
+      }),
+    ]);
+
+    return {
+      computedAt: state.computedAt.toISOString(),
+      scores: { adherence: state.adherenceScore, nutrition: state.nutritionScore },
+      trendStatus: state.trendStatus,
+      plateauStatus: state.plateauStatus,
+      behaviorFlags: state.behaviorFlags,
+      weekly: {
+        daysLogged7d: state.daysLogged7d,
+        avgCalories7d: state.avgCalories7d,
+        avgCalories30d: state.avgCalories30d,
+        calorieTarget: state.calorieTarget,
+        weightTrendKgWk: state.weightTrendKgWk,
+        loggingStreak: state.loggingStreak,
+      },
+      topRecommendation: topRec
+        ? {
+            reason: topRec.reason,
+            message: topRec.messageForUser,
+            type: topRec.type,
+            priority: topRec.priority,
+          }
+        : null,
+    };
   }
 
   /**

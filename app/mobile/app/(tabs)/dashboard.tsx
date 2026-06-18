@@ -10,6 +10,9 @@ import { MacroBar } from '../../src/components/MacroBar';
 import { Card } from '../../src/components/Card';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { EmptyState } from '../../src/components/EmptyState';
+import { IntelligenceCard } from '../../src/components/IntelligenceCard';
+import { HabitFlags } from '../../src/components/HabitFlags';
+import { useIntelligence } from '../../src/hooks/useIntelligence';
 import type { DailyLog, LoggedMeal } from '../../src/types';
 
 const MEAL_EMOJI: Record<string, string> = {
@@ -31,6 +34,7 @@ export default function DashboardScreen() {
   const { data: me, isLoading: loadingMe, refetch: refetchMe } = useMe();
   const { data: goal, isLoading: loadingGoal, refetch: refetchGoal } = useActiveGoal();
   const { data: todayRaw, refetch: refetchToday } = useTodayLog();
+  const { data: intel, refetch: refetchIntel } = useIntelligence();
   const { data: habitsData } = useQuery({
     queryKey: ['habits'],
     queryFn: () => apiClient.get('/users/me').then((r) => r.data),
@@ -40,9 +44,17 @@ export default function DashboardScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetchMe(), refetchGoal(), refetchToday()]);
+    await Promise.all([refetchMe(), refetchGoal(), refetchToday(), refetchIntel()]);
     setRefreshing(false);
   };
+
+  // Only surface the intelligence card once the backend actually has a signal.
+  const hasIntel =
+    !!intel &&
+    (intel.scores.adherence !== null ||
+      intel.topRecommendation !== null ||
+      intel.behaviorFlags.length > 0 ||
+      intel.plateauStatus === 'PLATEAU_SUSPECTED');
 
   if (loadingMe || loadingGoal) return <LoadingScreen message="Cargando tu plan..." />;
 
@@ -138,6 +150,9 @@ export default function DashboardScreen() {
           </Card>
         )}
 
+        {/* ── Intelligence (longitudinal, backend-derived) ── */}
+        {hasIntel && intel && <IntelligenceCard snapshot={intel} />}
+
         {/* ── Macros ── */}
         {goal && goal.targetCalories > 0 && (
           <Card className="mb-4">
@@ -175,6 +190,9 @@ export default function DashboardScreen() {
             </View>
           </Card>
         )}
+
+        {/* ── Detected habits (typed flags from the backend) ── */}
+        {hasIntel && intel && <HabitFlags flags={intel.behaviorFlags} />}
 
         {/* ── Today's meals ── */}
         <View className="mb-4">

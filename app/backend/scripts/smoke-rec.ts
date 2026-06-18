@@ -242,6 +242,19 @@ async function main() {
   const history = await prisma.recommendation.findMany({ where: { userId: plU.id }, select: { reason: true, type: true } });
   check('history query exposes reason', history.length === 1 && history[0].reason === 'PLATEAU_SUSPECTED');
 
+  // ── INTELLIGENCE SNAPSHOT (mobile surface, read-only projection) ──
+  console.log('\n── INTELLIGENCE SNAPSHOT ──');
+  const snap = await stateSvc.getIntelligenceSnapshot(plU.id);
+  check('snapshot: scores present', snap.scores.adherence !== null && snap.scores.nutrition !== null, `adh=${snap.scores.adherence} nut=${snap.scores.nutrition}`);
+  check('snapshot: plateauStatus mirrors rollup', snap.plateauStatus === 'PLATEAU_SUSPECTED', snap.plateauStatus);
+  check('snapshot: behaviorFlags is array', Array.isArray(snap.behaviorFlags));
+  check('snapshot: weekly.daysLogged7d=6', snap.weekly.daysLogged7d === 6, `got ${snap.weekly.daysLogged7d}`);
+  check('snapshot: topRecommendation reason exposed', snap.topRecommendation?.reason === 'PLATEAU_SUSPECTED', snap.topRecommendation?.reason ?? 'null');
+  check('snapshot: computedAt is ISO string', typeof snap.computedAt === 'string' && snap.computedAt.includes('T'));
+
+  const snapEmpty = await stateSvc.getIntelligenceSnapshot(loU.id);
+  check('snapshot: no pending rec → topRecommendation null', snapEmpty.topRecommendation === null);
+
   await prisma.$disconnect();
   try { await pg.stop(); } catch { /* teardown */ }
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }

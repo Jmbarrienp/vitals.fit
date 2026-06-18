@@ -42,8 +42,9 @@ export function useLogMeal() {
   return useMutation({
     mutationFn: nutritionApi.logMeal,
     onSuccess: () => {
-      // Logging changes today's totals and the recent/frequent food lists.
-      ['today', 'food-recent', 'food-frequent'].forEach((k) =>
+      // Logging changes today's totals, the recent/frequent food lists, and the
+      // longitudinal state (marked stale on the backend → next read recomputes).
+      ['today', 'food-recent', 'food-frequent', 'intelligence'].forEach((k) =>
         queryClient.invalidateQueries({ queryKey: [k] }),
       );
     },

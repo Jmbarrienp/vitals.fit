@@ -134,9 +134,45 @@ export interface Recommendation {
   type: string;
   priority: 'HIGH' | 'MEDIUM' | 'LOW';
   trigger: string;
+  reason: string | null; // structured RecommendationReason code (2A.3)
   messageForUser: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
   planChange: boolean;
   calorieAdjustment: number | null;
   createdAt: string;
+}
+
+// ── Longitudinal nutrition intelligence (2A.4) ──
+// These mirror backend enums. The client renders them; it never recomputes them.
+export type PlateauStatus = 'INSUFFICIENT_DATA' | 'NONE' | 'PLATEAU_SUSPECTED';
+
+export type BehaviorFlag =
+  | 'PROTEIN_CHRONIC_LOW'
+  | 'LOW_LOGGING_CONSISTENCY'
+  | 'WEEKEND_OVEREATING'
+  | 'BREAKFAST_SKIPPED';
+
+export interface IntelligenceSnapshot {
+  computedAt: string;
+  scores: {
+    adherence: number | null;
+    nutrition: number | null;
+  };
+  trendStatus: string | null;
+  plateauStatus: PlateauStatus;
+  behaviorFlags: BehaviorFlag[];
+  weekly: {
+    daysLogged7d: number;
+    avgCalories7d: number | null;
+    avgCalories30d: number | null;
+    calorieTarget: number | null;
+    weightTrendKgWk: number | null;
+    loggingStreak: number;
+  };
+  topRecommendation: {
+    reason: string | null;
+    message: string;
+    type: string;
+    priority: string;
+  } | null;
 }

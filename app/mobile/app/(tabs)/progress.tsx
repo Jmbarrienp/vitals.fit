@@ -64,7 +64,9 @@ export default function ProgressScreen() {
     onSuccess: () => {
       setWeight('');
       setNotes('');
+      // Weight changes both the progress summary and the longitudinal state.
       queryClient.invalidateQueries({ queryKey: ['progress'] });
+      queryClient.invalidateQueries({ queryKey: ['intelligence'] });
       Alert.alert('✅ Guardado', 'Peso registrado correctamente.');
     },
     onError: () => Alert.alert('Error', 'No se pudo guardar el peso.'),
