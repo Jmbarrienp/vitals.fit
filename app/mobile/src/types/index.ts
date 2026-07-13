@@ -191,3 +191,95 @@ export interface IntelligenceSnapshot {
     status: RecommendationStatus; // 2B.1
   } | null;
 }
+
+// ── Weekly Review + Behavior Follow-Up (2B.3) ──
+// Read-only projection over the immutable weekly ledger + recommendation lifecycle.
+// The client renders these structured codes via the copy map; it computes nothing.
+export type ReviewMetric =
+  | 'adherenceScore'
+  | 'nutritionScore'
+  | 'loggingStreak'
+  | 'proteinStreakDays'
+  | 'calorieStreakDays'
+  | 'daysLogged';
+
+export interface MetricDelta {
+  metric: ReviewMetric;
+  from: number | null;
+  to: number | null;
+  delta: number;
+}
+
+export type FollowUpBasis =
+  | 'PERSISTENT_INTERVENED'
+  | 'PERSISTENT_IGNORED'
+  | 'NEW_ISSUE'
+  | 'RESOLVED_NEXT'
+  | 'MAINTAIN';
+
+export interface NextPriority {
+  reason: string;
+  basis: FollowUpBasis;
+}
+
+export interface CommitmentOutcome {
+  reason: string | null;
+  status: 'COMPLETED' | 'EXPIRED';
+  message: string;
+}
+
+export interface WeeklyReview {
+  weekStart: string;
+  isoYear: number;
+  isoWeek: number;
+  adherenceScore: number | null;
+  nutritionScore: number | null;
+  daysLogged: number;
+  loggingStreak: number;
+  improved: MetricDelta[];
+  worsened: MetricDelta[];
+  stable: ReviewMetric[];
+  biggestOpportunity: string | null;
+  biggestImprovement: string | null;
+  commitments: {
+    completed: number;
+    expired: number;
+    completionRate: number | null;
+    outcomes: CommitmentOutcome[];
+  };
+  nextPriority: NextPriority | null;
+}
+
+export interface IssueFollowUp {
+  issue: string;
+  weeksActive: number;
+  status: 'RESOLVED' | 'PERSISTING' | 'NEW';
+  intervention: 'INTERVENED' | 'IGNORED' | 'NONE';
+}
+
+export interface FollowUp {
+  resolved: IssueFollowUp[];
+  persisting: IssueFollowUp[];
+  emerged: IssueFollowUp[];
+  successfulInterventions: number;
+  repeatedFailures: number;
+}
+
+export interface RetentionMetrics {
+  weeksTracked: number;
+  recommendationCompletionRate: number | null;
+  commitmentAcceptanceRate: number | null;
+  commitmentCompletionRate: number | null;
+  weeklyConsistency: number | null;
+  improvementVelocity: number | null;
+  interventionSuccessRate: number | null;
+}
+
+export interface ReviewSnapshot {
+  hasReview: boolean;
+  current: WeeklyReview | null;
+  previous: WeeklyReview | null;
+  followUp: FollowUp;
+  retention: RetentionMetrics;
+  nextPriorities: NextPriority[];
+}

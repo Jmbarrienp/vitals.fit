@@ -7,7 +7,9 @@ import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { EmptyState } from '../../src/components/EmptyState';
 import { ErrorState } from '../../src/components/ErrorState';
 import { WeeklySummaryCard } from '../../src/components/WeeklySummaryCard';
+import { WeeklyReviewCard } from '../../src/components/WeeklyReviewCard';
 import { useIntelligence } from '../../src/hooks/useIntelligence';
+import { useWeeklyReview } from '../../src/hooks/useWeeklyReview';
 import { useCommitRecommendation, useCompleteRecommendation } from '../../src/hooks/useCommitment';
 import { reasonLabel } from '../../src/lib/intelligence';
 import type { Recommendation } from '../../src/types';
@@ -99,13 +101,14 @@ export default function RecommendationsScreen() {
     retry: 1,
   });
   const { data: intel, refetch: refetchIntel } = useIntelligence();
+  const { data: reviewSnap, refetch: refetchReview } = useWeeklyReview();
 
   const showWeekly =
     !!intel && (intel.weekly.daysLogged7d > 0 || intel.topRecommendation !== null);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetch(), refetchIntel()]);
+    await Promise.all([refetch(), refetchIntel(), refetchReview()]);
     setRefreshing(false);
   };
 
@@ -125,7 +128,10 @@ export default function RecommendationsScreen() {
           Lo que el sistema aprendió de tus datos.
         </Text>
 
-        {/* ── Weekly summary (backend-derived intelligence) ── */}
+        {/* ── Weekly Review (closed-loop coaching over the ledger) ── */}
+        {reviewSnap?.hasReview && <WeeklyReviewCard snapshot={reviewSnap} />}
+
+        {/* ── This week so far (live backend-derived intelligence) ── */}
         {showWeekly && intel && <WeeklySummaryCard snapshot={intel} />}
 
         {isError && (

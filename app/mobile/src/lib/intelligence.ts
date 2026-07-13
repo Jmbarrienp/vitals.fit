@@ -4,7 +4,7 @@
  * It contains NO recomputation — it only labels and themes values the backend
  * already decided. Keep copy short and specific (no wellness fluff).
  */
-import type { BehaviorFlag, PlateauStatus } from '../types';
+import type { BehaviorFlag, FollowUpBasis, PlateauStatus, ReviewMetric } from '../types';
 
 export interface Copy {
   label: string;
@@ -98,4 +98,45 @@ export function scoreBand(score: number | null): { label: string; color: string 
   if (score >= 60) return { label: 'Bien', color: '#6366f1' };
   if (score >= 40) return { label: 'Mejorable', color: '#f59e0b' };
   return { label: 'Bajo', color: '#ef4444' };
+}
+
+// ── Weekly Review (2B.3) copy. Codes decided by the backend engine; text lives here. ──
+const METRIC_COPY: Record<ReviewMetric, string> = {
+  adherenceScore: 'Adherencia',
+  nutritionScore: 'Nutrición',
+  loggingStreak: 'Racha de registro',
+  proteinStreakDays: 'Racha de proteína',
+  calorieStreakDays: 'Racha de calorías',
+  daysLogged: 'Días registrados',
+};
+
+export function metricLabel(metric: ReviewMetric): string {
+  return METRIC_COPY[metric] ?? metric;
+}
+
+// primaryImprovement (WeeklyImprovement) → short "what got better" copy.
+const IMPROVEMENT_COPY: Record<string, string> = {
+  ADHERENCE_IMPROVED: 'Mejoró tu adherencia',
+  NUTRITION_IMPROVED: 'Mejoró tu nutrición',
+  LOGGING_STREAK_IMPROVED: 'Creció tu racha de registro',
+  PROTEIN_STREAK_IMPROVED: 'Creció tu racha de proteína',
+  WEIGHT_TREND_IMPROVED: 'Mejoró tu tendencia de peso',
+};
+
+export function improvementLabel(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return IMPROVEMENT_COPY[code] ?? null;
+}
+
+// How the follow-up engine framed the next priority — sets the tone of the callout.
+const BASIS_COPY: Record<FollowUpBasis, { label: string; color: string }> = {
+  PERSISTENT_INTERVENED: { label: 'Sigue pendiente pese a tu esfuerzo — probemos otro enfoque', color: '#ef4444' },
+  PERSISTENT_IGNORED: { label: 'Esto sigue sin resolverse', color: '#f59e0b' },
+  NEW_ISSUE: { label: 'Algo nuevo apareció esta semana', color: '#f59e0b' },
+  RESOLVED_NEXT: { label: 'Lo resolviste — mantén el rumbo', color: '#22c55e' },
+  MAINTAIN: { label: 'Vas bien — mantén el hábito', color: '#22c55e' },
+};
+
+export function basisCopy(basis: FollowUpBasis): { label: string; color: string } {
+  return BASIS_COPY[basis] ?? { label: 'Enfócate en tu siguiente meta', color: '#6366f1' };
 }
