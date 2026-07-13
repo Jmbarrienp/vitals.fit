@@ -41,6 +41,7 @@ model User {
   deviceTokens    DeviceToken[]
   foodFavorites   FoodFavorite[]
   nutritionState  UserNutritionState?
+  weeklySnapshots WeeklyNutritionSnapshot[]
 
   @@index([email])
   @@index([deletedAt])
@@ -159,6 +160,70 @@ model UserNutritionState {
   updatedAt DateTime @updatedAt
 
   @@index([stale])
+}
+
+// Append-only Weekly Behavioral Ledger (Phase 2B.2). ONE row per COMPLETED ISO
+// week — immutable history, never rewritten. Stores aggregates only, never raw
+// logs. UserNutritionState answers "how is the user NOW"; this answers "how did
+// the user perform in week N" without touching a single meal row. The historical
+// foundation for Weekly/Monthly Review, Claude Coach, Progress Timeline and ML.
+// Every derived field comes from the shared deriveState() (anchor = week end), so
+// there is no second copy of the scoring math. No updatedAt: rows never mutate.
+model WeeklyNutritionSnapshot {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Stable natural key: Monday 00:00 UTC of the ISO week. isoYear/isoWeek ease
+  // grouping (monthly rollups, timelines) without re-deriving from weekStart.
+  weekStart       DateTime @db.Date
+  isoYear         Int
+  isoWeek         Int
+  snapshotVersion Int      @default(1) // formula version that produced this row
+
+  // Goal in effect that week (denormalized so a plan change later can't rewrite history).
+  goalType       String?
+  calorieTarget  Int?
+  proteinTargetG Int?
+
+  // Derived scores/status as of week end (deriveState, single source of the math).
+  adherenceScore Int?
+  nutritionScore Int?
+  trendStatus    String?
+  plateauStatus  PlateauStatus  @default(INSUFFICIENT_DATA)
+  behaviorFlags  BehaviorFlag[]
+
+  // Intake aggregates for the week.
+  avgCalories  Float?
+  avgProtein   Float?
+  adherencePct Float?
+  daysLogged   Int    @default(0)
+
+  // Consistency streaks alive at week end.
+  loggingStreak     Int @default(0)
+  proteinStreakDays Int @default(0)
+  calorieStreakDays Int @default(0)
+
+  // Weight trajectory as of week end.
+  currentWeightKg  Float?
+  weightTrendKgWk  Float?
+  weightDataPoints Int    @default(0)
+
+  // Behavior / commitment aggregates for the week (retention instrumentation).
+  generatedRecommendations Int    @default(0)
+  acceptedRecommendations  Int    @default(0)
+  completedCommitments     Int    @default(0)
+  expiredCommitments       Int    @default(0)
+  completionRate           Float? // completed / (completed + expired); null when none reached a terminal state
+
+  // Structured narrative (growable TS codes, never free-form strings).
+  primaryIssue       String? // RecommendationReason code — the week's dominant problem
+  primaryImprovement String? // WeeklyImprovement code — biggest positive delta vs the prior week
+
+  createdAt DateTime @default(now()) // when this week was appended; intentionally NO updatedAt
+
+  @@unique([userId, weekStart])
+  @@index([userId, weekStart])
 }
 
 // ─────────────────────────────────────────────

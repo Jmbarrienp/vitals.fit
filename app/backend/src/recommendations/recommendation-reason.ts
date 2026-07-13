@@ -1,5 +1,20 @@
 import { BehaviorFlag, PlateauStatus, Priority, RecommendationType } from '@prisma/client';
 
+/** String union of the reason codes (the persisted form). */
+export type RecommendationReasonCode = `${RecommendationReason}`;
+
+/**
+ * Structured mapping from a detected behavior flag to its reason code. One place,
+ * reused by the nudge engine's intent and the Weekly Ledger's primaryIssue — so a
+ * flag always resolves to the same structured reason without free-form strings.
+ */
+export const FLAG_TO_REASON: Record<BehaviorFlag, RecommendationReasonCode> = {
+  PROTEIN_CHRONIC_LOW: 'PROTEIN_CHRONIC_LOW',
+  WEEKEND_OVEREATING: 'WEEKEND_DRIFT',
+  BREAKFAST_SKIPPED: 'BREAKFAST_SKIPPED',
+  LOW_LOGGING_CONSISTENCY: 'LOW_LOGGING_CONSISTENCY',
+};
+
 /**
  * Structured "why" behind every recommendation. This is the single, typed
  * vocabulary the whole recommendation surface speaks — the foundation for
