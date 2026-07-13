@@ -129,6 +129,14 @@ export interface ProgressSummary {
 }
 
 // Recommendations
+export type RecommendationStatus =
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'COMMITTED' // 2B.1 — user pledged to act on it
+  | 'COMPLETED'; // 2B.1 — user marked the commitment done
+
 export interface Recommendation {
   id: string;
   type: string;
@@ -136,9 +144,12 @@ export interface Recommendation {
   trigger: string;
   reason: string | null; // structured RecommendationReason code (2A.3)
   messageForUser: string;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+  status: RecommendationStatus;
   planChange: boolean;
   calorieAdjustment: number | null;
+  committedAt?: string | null; // 2B.1
+  commitExpiresAt?: string | null; // 2B.1
+  completedAt?: string | null; // 2B.1
   createdAt: string;
 }
 
@@ -168,11 +179,15 @@ export interface IntelligenceSnapshot {
     calorieTarget: number | null;
     weightTrendKgWk: number | null;
     loggingStreak: number;
+    proteinStreakDays: number; // 2B.1
+    calorieStreakDays: number; // 2B.1
   };
   topRecommendation: {
+    id: string; // 2B.1
     reason: string | null;
     message: string;
     type: string;
     priority: string;
+    status: RecommendationStatus; // 2B.1
   } | null;
 }

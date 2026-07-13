@@ -117,7 +117,7 @@ async function main() {
   check('nuevo: avgCalories7d=null', s0.avgCalories7d === null);
   check('nuevo: trendStatus=insufficient_data', s0.trendStatus === 'insufficient_data');
   check('nuevo: snapshot de meta (target 1900)', s0.goalType === 'LOSE_FAT' && s0.calorieTarget === 1900);
-  check('nuevo: stale=false, version=2 tras recompute', s0.stale === false && s0.version === 2);
+  check('nuevo: stale=false, version=3 tras recompute', s0.stale === false && s0.version === 3);
   check('nuevo: scores null, plateau INSUFFICIENT_DATA, sin flags', s0.adherenceScore === null && s0.nutritionScore === null && s0.plateauStatus === 'INSUFFICIENT_DATA' && s0.behaviorFlags.length === 0);
 
   // 2. Insertar 4 días logueados (dentro de 7d) con 2 comidas c/u + streak
@@ -142,7 +142,11 @@ async function main() {
   check('logs: daysLogged7d=4', s1.daysLogged7d === 4, `got ${s1.daysLogged7d}`);
   check('logs: daysLogged30d=5', s1.daysLogged30d === 5, `got ${s1.daysLogged30d}`);
   check('logs: avgCalories7d=1850', s1.avgCalories7d === 1850, `got ${s1.avgCalories7d}`);
-  check('logs: loggingStreak=4 (desde UserHabits)', s1.loggingStreak === 4);
+  // 2B.1: streaks are now LOG-DERIVED (not from UserHabits). Logs at days {1,2,3,5}:
+  // day 4 is missing, so the consecutive streak ending yesterday is 3 (days 1-2-3).
+  check('logs: loggingStreak=3 (log-derived, day-4 gap breaks it)', s1.loggingStreak === 3, `got ${s1.loggingStreak}`);
+  check('logs: calorieStreakDays=3 (1800/2000/1700 within band)', s1.calorieStreakDays === 3, `got ${s1.calorieStreakDays}`);
+  check('logs: proteinStreakDays=0 (120 < 90% of 150 target)', s1.proteinStreakDays === 0, `got ${s1.proteinStreakDays}`);
   check('logs: avgMealsPerDay=2', s1.avgMealsPerDay === 2, `got ${s1.avgMealsPerDay}`);
   check('logs: adherencePct7d=90', s1.adherencePct7d === 90, `got ${s1.adherencePct7d}`);
 
@@ -158,8 +162,8 @@ async function main() {
 
   // ── 2A.2 estado derivado ──
   console.log('\n── ESTADO DERIVADO (2A.2) ──');
-  check('version bump a 2', s2.version === 2, `v=${s2.version}`);
-  check('adherenceScore=67 (4/7 días, streak 4, adherencia 90)', s2.adherenceScore === 67, `got ${s2.adherenceScore}`);
+  check('version bump a 3', s2.version === 3, `v=${s2.version}`);
+  check('adherenceScore=64 (4/7 días, streak 3 log-derived, adherencia 90)', s2.adherenceScore === 64, `got ${s2.adherenceScore}`);
   check('nutritionScore=90 (1850 vs 1900, prot 125/150)', s2.nutritionScore === 90, `got ${s2.nutritionScore}`);
   check('flag BREAKFAST_SKIPPED (solo lunch/dinner)', s2.behaviorFlags.includes('BREAKFAST_SKIPPED' as any));
   check('NO flag PROTEIN_CHRONIC_LOW (proteína adecuada)', !s2.behaviorFlags.includes('PROTEIN_CHRONIC_LOW' as any));

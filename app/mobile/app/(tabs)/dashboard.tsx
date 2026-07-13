@@ -3,8 +3,6 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useMe } from '../../src/hooks/useAuth';
 import { useActiveGoal, useTodayLog } from '../../src/hooks/useNutrition';
-import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '../../src/api/client';
 import { ProgressRing } from '../../src/components/ProgressRing';
 import { MacroBar } from '../../src/components/MacroBar';
 import { Card } from '../../src/components/Card';
@@ -35,11 +33,6 @@ export default function DashboardScreen() {
   const { data: goal, isLoading: loadingGoal, refetch: refetchGoal } = useActiveGoal();
   const { data: todayRaw, refetch: refetchToday } = useTodayLog();
   const { data: intel, refetch: refetchIntel } = useIntelligence();
-  const { data: habitsData } = useQuery({
-    queryKey: ['habits'],
-    queryFn: () => apiClient.get('/users/me').then((r) => r.data),
-    retry: false,
-  });
   const router = useRouter();
 
   const onRefresh = async () => {
@@ -71,8 +64,9 @@ export default function DashboardScreen() {
   const targetCalories = goal?.targetCalories ?? 0;
   const caloriePct = targetCalories > 0 ? Math.round((calories / targetCalories) * 100) : 0;
   const remaining = Math.max(0, targetCalories - calories);
-  const streak =
-    (habitsData as { habits?: { currentStreak?: number } })?.habits?.currentStreak ?? 0;
+  // Single source of truth: the log-derived streak from the rollup (self-healing),
+  // not the event-counter that froze on inactivity.
+  const streak = intel?.weekly.loggingStreak ?? 0;
 
   const todayLabel = new Date().toLocaleDateString('es', {
     weekday: 'long',

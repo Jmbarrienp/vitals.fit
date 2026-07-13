@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { recommendationsApi } from '../../src/api/recommendations';
 import { Card } from '../../src/components/Card';
@@ -8,6 +8,7 @@ import { EmptyState } from '../../src/components/EmptyState';
 import { ErrorState } from '../../src/components/ErrorState';
 import { WeeklySummaryCard } from '../../src/components/WeeklySummaryCard';
 import { useIntelligence } from '../../src/hooks/useIntelligence';
+import { useCommitRecommendation, useCompleteRecommendation } from '../../src/hooks/useCommitment';
 import { reasonLabel } from '../../src/lib/intelligence';
 import type { Recommendation } from '../../src/types';
 
@@ -24,10 +25,59 @@ const TRIGGER_LABEL: Record<string, string> = {
 };
 
 const STATUS_CFG: Record<string, { text: string; color: string }> = {
-  ACCEPTED: { text: 'Aceptada', color: '#22c55e' },
-  REJECTED: { text: 'Ignorada', color: '#64748b' },
-  EXPIRED:  { text: 'Expirada', color: '#64748b' },
+  ACCEPTED:  { text: 'Aceptada', color: '#22c55e' },
+  REJECTED:  { text: 'Ignorada', color: '#64748b' },
+  EXPIRED:   { text: 'Expirada', color: '#64748b' },
+  COMMITTED: { text: 'Comprometido', color: '#6366f1' },
+  COMPLETED: { text: 'Completado ✓', color: '#22c55e' },
 };
+
+/**
+ * Phase 2B.1 — turns a recommendation into an accountable commitment. Only
+ * actionable nudges (not plan-change confirmations) can be committed; once
+ * committed the user can mark it done. Reads status from the backend; the
+ * lifecycle lives there.
+ */
+function CommitActions({ rec }: { rec: Recommendation }) {
+  const commit = useCommitRecommendation();
+  const complete = useCompleteRecommendation();
+
+  if (rec.status === 'PENDING' && !rec.planChange) {
+    return (
+      <TouchableOpacity
+        className="mt-3 bg-primary/10 border border-primary/30 rounded-xl py-2.5 items-center flex-row justify-center gap-2"
+        activeOpacity={0.8}
+        disabled={commit.isPending}
+        onPress={() => commit.mutate(rec.id)}
+      >
+        {commit.isPending ? (
+          <ActivityIndicator size="small" color="#6366f1" />
+        ) : (
+          <Text className="text-primary font-semibold text-sm">✋ Me comprometo</Text>
+        )}
+      </TouchableOpacity>
+    );
+  }
+
+  if (rec.status === 'COMMITTED') {
+    return (
+      <TouchableOpacity
+        className="mt-3 bg-success/10 border border-success/30 rounded-xl py-2.5 items-center flex-row justify-center gap-2"
+        activeOpacity={0.8}
+        disabled={complete.isPending}
+        onPress={() => complete.mutate(rec.id)}
+      >
+        {complete.isPending ? (
+          <ActivityIndicator size="small" color="#22c55e" />
+        ) : (
+          <Text className="text-success font-semibold text-sm">✓ Marcar como hecho</Text>
+        )}
+      </TouchableOpacity>
+    );
+  }
+
+  return null;
+}
 
 function relativeTime(dateStr: string): string {
   const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -139,6 +189,7 @@ export default function RecommendationsScreen() {
                           </Text>
                         </View>
                       </View>
+                      <CommitActions rec={rec} />
                     </View>
                   </View>
                 </Card>

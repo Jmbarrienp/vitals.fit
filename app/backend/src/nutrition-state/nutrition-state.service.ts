@@ -5,7 +5,7 @@ import { computeWeightTrend } from '../common/metrics/weight-trend';
 import { IntelligenceSnapshot } from './types/intelligence-snapshot';
 
 /** Bump to invalidate every cached state on its next read (no migration needed). */
-export const CURRENT_STATE_VERSION = 2; // 2A.2: scores + flags + plateau
+export const CURRENT_STATE_VERSION = 3; // 2B.1: log-derived streaks (logging/protein/calorie)
 const STATE_TTL_MS = 12 * 60 * 60 * 1000; // 12h freshness window
 const WEIGHT_WINDOW_DAYS = 30;
 const MIN_WEIGHT_POINTS = 3; // mirror progress-analyst's gate before classifying a trend
@@ -16,6 +16,11 @@ const WEEKEND_OVEREAT_RATIO = 1.15; // weekend cals >15% over weekdays
 const BREAKFAST_MIN_RATE = 0.3; // breakfast on <30% of logged days = skipped
 const LOW_CONSISTENCY_MAX_DAYS = 4; // < 4 logged days in 7 = inconsistent
 const PLATEAU_ADHERENCE_MIN = 70; // "high adherence" gate for a real plateau
+
+// ── Phase 2B.1 streak thresholds — a day "counts" toward each streak when: ──
+const PROTEIN_STREAK_MIN_RATIO = 0.9; // protein within 10% of target counts as hit
+const CAL_STREAK_LOW_RATIO = 0.8; // calories within [0.8x .. 1.1x] of target = on-target day
+const CAL_STREAK_HIGH_RATIO = 1.1;
 
 @Injectable()
 export class NutritionStateService {
@@ -50,12 +55,21 @@ export class NutritionStateService {
    * — no metric is recomputed here. This is what the UI renders.
    */
   async getIntelligenceSnapshot(userId: string): Promise<IntelligenceSnapshot> {
+    const now = new Date();
     const [state, topRec] = await Promise.all([
       this.get(userId),
+      // The "what to do now" action: the newest still-actionable item — an untouched
+      // nudge OR a live commitment (so a pledged action keeps showing as the focus).
       this.prisma.recommendation.findFirst({
-        where: { userId, status: 'PENDING' },
+        where: {
+          userId,
+          OR: [
+            { status: 'PENDING' },
+            { status: 'COMMITTED', commitExpiresAt: { gt: now } },
+          ],
+        },
         orderBy: { createdAt: 'desc' },
-        select: { reason: true, messageForUser: true, type: true, priority: true },
+        select: { id: true, reason: true, messageForUser: true, type: true, priority: true, status: true },
       }),
     ]);
 
@@ -72,13 +86,17 @@ export class NutritionStateService {
         calorieTarget: state.calorieTarget,
         weightTrendKgWk: state.weightTrendKgWk,
         loggingStreak: state.loggingStreak,
+        proteinStreakDays: state.proteinStreakDays,
+        calorieStreakDays: state.calorieStreakDays,
       },
       topRecommendation: topRec
         ? {
+            id: topRec.id,
             reason: topRec.reason,
             message: topRec.messageForUser,
             type: topRec.type,
             priority: topRec.priority,
+            status: topRec.status,
           }
         : null,
     };
@@ -93,15 +111,11 @@ export class NutritionStateService {
     const day7 = startOfDay(daysAgo(now, 7));
     const day30 = startOfDay(daysAgo(now, WEIGHT_WINDOW_DAYS));
 
-    const [goal, habits, logs30, weights] = await Promise.all([
+    const [goal, logs30, weights] = await Promise.all([
       this.prisma.goal.findFirst({
         where: { userId, isActive: true },
         orderBy: { createdAt: 'desc' },
         select: { type: true, targetCalories: true, proteinG: true },
-      }),
-      this.prisma.userHabits.findUnique({
-        where: { userId },
-        select: { currentStreak: true },
       }),
       this.prisma.dailyLog.findMany({
         where: { userId, date: { gte: day30 } },
@@ -145,9 +159,27 @@ export class NutritionStateService {
     const calorieTarget = goal?.targetCalories ?? null;
     const proteinTarget = goal?.proteinG ?? null;
 
+    // ── Phase 2B.1: consistency streaks, derived from logs (single source of truth).
+    // Self-healing — a gap or a deleted log shortens the streak on the next recompute,
+    // unlike the old event-counter that could freeze on inactivity.
+    const loggingStreak = streakEndingToday(logged30, () => true);
+    const proteinStreakDays =
+      proteinTarget && proteinTarget > 0
+        ? streakEndingToday(logged30, (l) => l.proteinG >= proteinTarget * PROTEIN_STREAK_MIN_RATIO)
+        : 0;
+    const calorieStreakDays =
+      calorieTarget && calorieTarget > 0
+        ? streakEndingToday(
+            logged30,
+            (l) =>
+              l.caloriesLogged >= calorieTarget * CAL_STREAK_LOW_RATIO &&
+              l.caloriesLogged <= calorieTarget * CAL_STREAK_HIGH_RATIO,
+          )
+        : 0;
+
     const adherenceScore = computeAdherenceScore({
       daysLogged7d: logged7.length,
-      loggingStreak: habits?.currentStreak ?? 0,
+      loggingStreak,
       adherencePct7d,
     });
     const nutritionScore = computeNutritionScore({
@@ -185,7 +217,9 @@ export class NutritionStateService {
       avgCalories30d,
       avgProtein7d,
       adherencePct7d,
-      loggingStreak: habits?.currentStreak ?? 0,
+      loggingStreak,
+      proteinStreakDays,
+      calorieStreakDays,
       daysLogged7d: logged7.length,
       daysLogged30d: logged30.length,
       avgMealsPerDay,
@@ -226,6 +260,39 @@ function startOfDay(d: Date): Date {
 
 function avg(xs: number[]): number | null {
   return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+}
+
+/**
+ * Phase 2B.1 — consecutive-day streak ending today, with a one-day grace so a
+ * not-yet-logged today does not break the streak (we anchor on yesterday instead).
+ * Counts only logged days that satisfy `qualifies`. Keyed by UTC date so it matches
+ * @db.Date columns exactly regardless of server timezone. Deterministic, self-healing:
+ * a gap or a deleted log simply shortens the streak on the next recompute.
+ */
+function streakEndingToday<T extends { date: Date }>(
+  loggedDays: T[],
+  qualifies: (day: T) => boolean,
+): number {
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  const keys = new Set<string>();
+  for (const d of loggedDays) {
+    if (qualifies(d)) keys.add(d.date.toISOString().slice(0, 10));
+  }
+  if (keys.size === 0) return 0;
+
+  const keyOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const today = new Date();
+  let cursor = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  if (!keys.has(keyOf(cursor))) {
+    cursor -= MS_PER_DAY; // grace day
+    if (!keys.has(keyOf(cursor))) return 0;
+  }
+  let count = 0;
+  while (keys.has(keyOf(cursor))) {
+    count++;
+    cursor -= MS_PER_DAY;
+  }
+  return count;
 }
 
 function round1(x: number | null): number | null {

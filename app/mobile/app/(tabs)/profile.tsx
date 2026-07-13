@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useMe } from '../../src/hooks/useAuth';
 import { useActiveGoal } from '../../src/hooks/useNutrition';
 import { useProfile } from '../../src/hooks/useProfile';
+import { useIntelligence } from '../../src/hooks/useIntelligence';
 import { useAuthStore } from '../../src/store/authStore';
 import { Card } from '../../src/components/Card';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
@@ -51,6 +52,7 @@ export default function ProfileScreen() {
   const { data: me, isLoading: loadingMe } = useMe();
   const { data: profileData, isLoading: loadingProfile } = useProfile();
   const { data: goal, isLoading: loadingGoal } = useActiveGoal();
+  const { data: intel } = useIntelligence();
 
   if (loadingMe || loadingProfile || loadingGoal) return <LoadingScreen message="Cargando perfil..." />;
 
@@ -59,8 +61,10 @@ export default function ProfileScreen() {
     ?.habits;
   const name = profile?.name ?? me?.email?.split('@')[0] ?? 'Usuario';
   const initial = name[0]?.toUpperCase() ?? 'U';
-  const currentStreak = habits?.currentStreak ?? 0;
-  const longestStreak = habits?.longestStreak ?? 0;
+  // Current streak: the rollup's log-derived value (same source as the dashboard).
+  // Longest streak remains the all-time trophy tracked in UserHabits.
+  const currentStreak = intel?.weekly.loggingStreak ?? habits?.currentStreak ?? 0;
+  const longestStreak = Math.max(habits?.longestStreak ?? 0, currentStreak);
 
   const handleLogout = () => {
     Alert.alert('Cerrar sesión', '¿Estás seguro que quieres salir?', [

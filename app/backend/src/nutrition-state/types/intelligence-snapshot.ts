@@ -22,11 +22,15 @@ export interface IntelligenceSnapshot {
     calorieTarget: number | null;
     weightTrendKgWk: number | null;
     loggingStreak: number;
+    proteinStreakDays: number; // 2B.1 — consecutive days hitting protein target
+    calorieStreakDays: number; // 2B.1 — consecutive days within calorie target band
   };
   topRecommendation: {
+    id: string; // 2B.1 — lets the client commit/complete this action
     reason: string | null; // RecommendationReason code (structured)
     message: string;
     type: string;
     priority: string;
+    status: string; // 2B.1 — PENDING | COMMITTED (so the UI shows pledged state)
   } | null;
 }

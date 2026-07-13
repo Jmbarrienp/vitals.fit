@@ -151,6 +151,11 @@ model UserNutritionState {
   plateauStatus  PlateauStatus  @default(INSUFFICIENT_DATA)
   behaviorFlags  BehaviorFlag[]
 
+  // ── Phase 2B.1: consistency streaks (derived from logs in recompute(), self-healing) ──
+  // loggingStreak above is now ALSO derived here (no longer mirrors UserHabits.currentStreak).
+  proteinStreakDays Int @default(0) // consecutive recent days hitting the protein target
+  calorieStreakDays Int @default(0) // consecutive recent days within the calorie target band
+
   updatedAt DateTime @updatedAt
 
   @@index([stale])
@@ -527,6 +532,10 @@ model Recommendation {
   userResponse         String?
   expiresAt            DateTime?
   respondedAt          DateTime?
+  // ── Phase 2B.1: commitment lifecycle (a recommendation the user pledged to act on) ──
+  committedAt          DateTime?            // set when the user commits (PENDING -> COMMITTED)
+  commitExpiresAt      DateTime?            // commitment window; swept to EXPIRED lazily on read (no cron)
+  completedAt          DateTime?            // set when the user marks it done (COMMITTED -> COMPLETED)
   createdAt            DateTime             @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -555,6 +564,8 @@ enum RecommendationStatus {
   ACCEPTED
   REJECTED
   EXPIRED
+  COMMITTED // Phase 2B.1: user pledged to act on it (accountability)
+  COMPLETED // Phase 2B.1: user marked the commitment done
 }
 
 model Notification {

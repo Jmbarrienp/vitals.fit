@@ -3,6 +3,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NutritionStateService } from '../nutrition-state/nutrition-state.service';
 import { decideNudge, decidePlanAdjustment, stateToInput } from './services/recommendation-engine';
 
+/** Phase 2B.1: how long a committed recommendation stays actionable before it lapses. */
+const COMMITMENT_WINDOW_DAYS = 7;
+
 @Injectable()
 export class RecommendationsService {
   constructor(
@@ -68,13 +71,16 @@ export class RecommendationsService {
   }
 
   async getActive(userId: string) {
+    await this.sweepExpiredCommitments(userId);
+    // "Active" now includes live commitments, not just untouched pending nudges.
     return this.prisma.recommendation.findMany({
-      where: { userId, status: 'PENDING' },
+      where: { userId, status: { in: ['PENDING', 'COMMITTED'] } },
       orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
     });
   }
 
   async getHistory(userId: string) {
+    await this.sweepExpiredCommitments(userId);
     return this.prisma.recommendation.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
@@ -89,8 +95,62 @@ export class RecommendationsService {
         status: true,
         planChange: true,
         calorieAdjustment: true,
+        committedAt: true,
+        commitExpiresAt: true,
+        completedAt: true,
         createdAt: true,
       },
+    });
+  }
+
+  /**
+   * Phase 2B.1 — a recommendation becomes an explicit commitment (accountability).
+   * Only an untouched PENDING recommendation can be committed; the act starts a
+   * fixed window after which it lapses (swept lazily on read, no cron).
+   */
+  async commit(userId: string, id: string) {
+    const rec = await this.prisma.recommendation.findFirst({ where: { id, userId } });
+    if (!rec) return { message: 'Recomendación no encontrada' };
+    if (rec.status !== 'PENDING') {
+      return { message: 'Esta recomendación ya no se puede comprometer', status: rec.status };
+    }
+    const now = new Date();
+    return this.prisma.recommendation.update({
+      where: { id },
+      data: {
+        status: 'COMMITTED',
+        committedAt: now,
+        commitExpiresAt: new Date(now.getTime() + COMMITMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+      },
+    });
+  }
+
+  /**
+   * Phase 2B.1 — the user marks a live commitment as done. Closing the loop is
+   * what turns intelligence into behavior; completion rate is read off these rows.
+   */
+  async complete(userId: string, id: string) {
+    const rec = await this.prisma.recommendation.findFirst({ where: { id, userId } });
+    if (!rec) return { message: 'Recomendación no encontrada' };
+    if (rec.status !== 'COMMITTED') {
+      return { message: 'Solo puedes completar un compromiso activo', status: rec.status };
+    }
+    if (rec.commitExpiresAt && rec.commitExpiresAt.getTime() < Date.now()) {
+      // Lapsed before completion — record the truth, don't pretend it was done.
+      await this.prisma.recommendation.update({ where: { id }, data: { status: 'EXPIRED' } });
+      return { message: 'El compromiso venció', status: 'EXPIRED' };
+    }
+    return this.prisma.recommendation.update({
+      where: { id },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    });
+  }
+
+  /** Lazy lifecycle: live commitments past their window become EXPIRED on the next read. */
+  private async sweepExpiredCommitments(userId: string): Promise<void> {
+    await this.prisma.recommendation.updateMany({
+      where: { userId, status: 'COMMITTED', commitExpiresAt: { lt: new Date() } },
+      data: { status: 'EXPIRED' },
     });
   }
 

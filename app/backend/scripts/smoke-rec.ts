@@ -32,6 +32,7 @@ const { Client } = require('pg');
 
 import { PrismaService } from '../src/prisma/prisma.service';
 import { NutritionStateService } from '../src/nutrition-state/nutrition-state.service';
+import { RecommendationsService } from '../src/recommendations/recommendations.service';
 import {
   decideNudge,
   decidePlanAdjustment,
@@ -118,6 +119,7 @@ async function main() {
   const prisma = new PrismaService();
   await prisma.$connect();
   const stateSvc = new NutritionStateService(prisma);
+  const recsSvc = new RecommendationsService(prisma, stateSvc);
 
   // ── NUDGE channel: single output, correct priority ──
   console.log('\n── NUDGE ENGINE ──');
@@ -211,6 +213,11 @@ async function main() {
   }
   const plState = await stateSvc.recompute(plU.id);
   check('rollup classifies PLATEAU_SUSPECTED', plState.plateauStatus === 'PLATEAU_SUSPECTED', plState.plateauStatus);
+
+  // ── Phase 2B.1: streaks derived from logs (6 consecutive logged days, ending yesterday) ──
+  check('rollup loggingStreak = 6 (log-derived, self-healing)', plState.loggingStreak === 6, `got ${plState.loggingStreak}`);
+  check('rollup proteinStreakDays = 6 (140 >= 90% of 150)', plState.proteinStreakDays === 6, `got ${plState.proteinStreakDays}`);
+  check('rollup calorieStreakDays = 6 (1850 within target band)', plState.calorieStreakDays === 6, `got ${plState.calorieStreakDays}`);
   const plDecision = decidePlanAdjustment(stateToInput({ goal: 'LOSE_FAT', state: plState, today: { caloriesLogged: 0, proteinG: 0, mealsLogged: 0 } }));
   check('engine (consumer) → cut -200 from rollup state', plDecision?.reason === RecommendationReason.PLATEAU_SUSPECTED && plDecision?.calorieAdjustment === -200, `${plDecision?.reason}`);
 
@@ -225,6 +232,7 @@ async function main() {
   }
   const loState = await stateSvc.recompute(loU.id);
   check('rollup: flat but low adherence → plateau NOT suspected', loState.plateauStatus !== 'PLATEAU_SUSPECTED', loState.plateauStatus);
+  check('rollup: non-consecutive logs → loggingStreak 0 (no frozen streak)', loState.loggingStreak === 0, `got ${loState.loggingStreak}`);
   const loDecision = decidePlanAdjustment(stateToInput({ goal: 'LOSE_FAT', state: loState, today: { caloriesLogged: 0, proteinG: 0, mealsLogged: 0 } }));
   check('engine withholds calorie cut for non-adherent user', loDecision === null);
 
@@ -249,11 +257,60 @@ async function main() {
   check('snapshot: plateauStatus mirrors rollup', snap.plateauStatus === 'PLATEAU_SUSPECTED', snap.plateauStatus);
   check('snapshot: behaviorFlags is array', Array.isArray(snap.behaviorFlags));
   check('snapshot: weekly.daysLogged7d=6', snap.weekly.daysLogged7d === 6, `got ${snap.weekly.daysLogged7d}`);
+  check('snapshot: weekly streaks exposed (logging=6)', snap.weekly.loggingStreak === 6 && snap.weekly.proteinStreakDays === 6 && snap.weekly.calorieStreakDays === 6);
   check('snapshot: topRecommendation reason exposed', snap.topRecommendation?.reason === 'PLATEAU_SUSPECTED', snap.topRecommendation?.reason ?? 'null');
+  check('snapshot: topRecommendation carries id + status (commit-ready)', typeof snap.topRecommendation?.id === 'string' && snap.topRecommendation?.status === 'PENDING', `${snap.topRecommendation?.status}`);
   check('snapshot: computedAt is ISO string', typeof snap.computedAt === 'string' && snap.computedAt.includes('T'));
 
   const snapEmpty = await stateSvc.getIntelligenceSnapshot(loU.id);
   check('snapshot: no pending rec → topRecommendation null', snapEmpty.topRecommendation === null);
+
+  // ── Phase 2B.1: COMMITMENT LIFECYCLE (recommendation -> pledge -> done, lazy expiry) ──
+  console.log('\n── COMMITMENT LIFECYCLE ──');
+  const cU = await prisma.user.create({ data: { email: 'rec-commit@test.local' } });
+  const mkRec = (over: any = {}) =>
+    prisma.recommendation.create({
+      data: {
+        userId: cU.id, type: 'BEHAVIOR_RECOMMENDATION', priority: 'MEDIUM',
+        trigger: 'meal.logged', reason: 'PROTEIN_CHRONIC_LOW',
+        messageForUser: 'Agrega 25g de proteína al desayuno.', planChange: false, requiresConfirmation: false,
+        ...over,
+      },
+    });
+
+  // commit: PENDING -> COMMITTED with a window
+  const rec1 = await mkRec();
+  const committed: any = await recsSvc.commit(cU.id, rec1.id);
+  check('commit: PENDING -> COMMITTED', committed.status === 'COMMITTED', committed.status);
+  check('commit: sets committedAt + a future commitExpiresAt', !!committed.committedAt && committed.commitExpiresAt > new Date());
+
+  // commit guard: a non-PENDING rec cannot be re-committed
+  const recommit: any = await recsSvc.commit(cU.id, rec1.id);
+  check('commit guard: already-committed cannot re-commit', recommit.status === 'COMMITTED' && !!recommit.message);
+
+  // complete: COMMITTED -> COMPLETED
+  const completed: any = await recsSvc.complete(cU.id, rec1.id);
+  check('complete: COMMITTED -> COMPLETED', completed.status === 'COMPLETED' && !!completed.completedAt, completed.status);
+
+  // complete guard: a non-committed rec cannot be completed
+  const rec2 = await mkRec();
+  const badComplete: any = await recsSvc.complete(cU.id, rec2.id);
+  check('complete guard: PENDING cannot be completed', !!badComplete.message && badComplete.status === 'PENDING');
+
+  // lazy expiry: a COMMITTED rec past its window becomes EXPIRED on the next read
+  const stale = await mkRec({ status: 'COMMITTED', committedAt: daysAgo(9), commitExpiresAt: daysAgo(2) });
+  await recsSvc.getHistory(cU.id); // sweeps
+  const sweptRow = await prisma.recommendation.findUnique({ where: { id: stale.id } });
+  check('lazy expiry: stale commitment swept to EXPIRED on read', sweptRow?.status === 'EXPIRED', sweptRow?.status ?? 'null');
+
+  // complete after window: refuses + records the truth (EXPIRED, not COMPLETED)
+  const stale2 = await mkRec({ status: 'COMMITTED', committedAt: daysAgo(9), commitExpiresAt: daysAgo(1) });
+  const lateComplete: any = await recsSvc.complete(cU.id, stale2.id);
+  check('complete after window: refuses and marks EXPIRED', lateComplete.status === 'EXPIRED' && !!lateComplete.message);
+
+  // getActive surfaces live commitments alongside pending nudges
+  const active = await recsSvc.getActive(cU.id);
+  check('getActive: includes PENDING + live COMMITTED only', active.every((r: any) => r.status === 'PENDING' || r.status === 'COMMITTED'), `n=${active.length}`);
 
   await prisma.$disconnect();
   try { await pg.stop(); } catch { /* teardown */ }
