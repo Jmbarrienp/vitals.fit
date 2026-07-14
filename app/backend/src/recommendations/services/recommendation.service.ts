@@ -1,14 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
-import { Priority, RecommendationType } from '@prisma/client';
+import { BehaviorFlag, PlateauStatus, Priority, RecommendationType } from '@prisma/client';
 import { AnthropicService } from '../../ai/services/anthropic.service';
 import { PromptBuilderService } from '../../ai/services/prompt-builder.service';
 import { ParserService } from '../../ai/services/parser.service';
 import { TelemetryService } from '../../ai/services/telemetry.service';
-import { ContextBuilderService } from './context-builder.service';
+import { CoachingContextService } from '../../nutrition-state/coaching-context.service';
+import { CoachingContext } from '../../nutrition-state/types/coaching-context';
 import { decideNudge } from './recommendation-engine';
 import { RecommendationInput, RecommendationReason } from '../recommendation-reason';
-import { UserSnapshot } from '../types/user-snapshot';
 
 /** What the listener persists + pushes: text plus its structured classification. */
 export interface GeneratedRecommendation {
@@ -27,14 +27,14 @@ export class RecommendationService {
     private readonly anthropic: AnthropicService,
     private readonly promptBuilder: PromptBuilderService,
     private readonly parser: ParserService,
-    private readonly contextBuilder: ContextBuilderService,
+    private readonly coachingContext: CoachingContextService,
     private readonly telemetry: TelemetryService,
   ) {}
 
   async generateForUser(userId: string, trigger: string): Promise<GeneratedRecommendation> {
     const startMs = Date.now();
 
-    let snap: UserSnapshot | undefined;
+    let ctx: CoachingContext | undefined;
     let inputTokenApprox: number | undefined;
     let outputTokens: number | undefined;
     let cacheHit = false;
@@ -46,8 +46,9 @@ export class RecommendationService {
     let success = false;
 
     try {
-      snap = await this.contextBuilder.buildSnapshot(userId);
-      decided = decideNudge(snapshotToInput(snap));
+      // The model-agnostic contract at daily depth (no history fetch per meal log).
+      ctx = await this.coachingContext.build(userId, 'today');
+      decided = decideNudge(contextToInput(ctx));
       text = decided.message;
 
       if (!this.anthropic.hasKey) {
@@ -57,7 +58,7 @@ export class RecommendationService {
       }
 
       const systemPrompt = this.promptBuilder.getSystemPrompt();
-      const userPrompt = this.promptBuilder.buildUserPrompt(snap);
+      const userPrompt = this.promptBuilder.buildUserPrompt(ctx);
       inputTokenApprox = Math.ceil((systemPrompt.length + userPrompt.length) / 4);
 
       const response = await this.anthropic.complete({
@@ -110,7 +111,7 @@ export class RecommendationService {
         inputTokenApprox,
         outputTokens,
         cacheHit,
-        compactSnapshot: snap ? toCompactSnapshot(snap, decided.reason) : undefined,
+        compactSnapshot: ctx ? toCompactSnapshot(ctx, decided.reason) : undefined,
         finalRecommendation: success || fallbackUsed ? text.slice(0, 200) : undefined,
         errorType,
       });
@@ -125,31 +126,35 @@ export class RecommendationService {
   }
 }
 
-/** UserSnapshot → engine input. The snapshot already carries rollup-sourced state. */
-export function snapshotToInput(snap: UserSnapshot): RecommendationInput {
+/**
+ * CoachingContext -> engine input. The contract's codes are value-identical to
+ * the internal enums (pinned in the contract), so this cast is the one narrow
+ * bridge back from the model-agnostic boundary into the typed engine.
+ */
+export function contextToInput(ctx: CoachingContext): RecommendationInput {
+  const s = ctx.currentState;
   return {
-    goal: snap.goal,
-    targets: { calories: snap.targets.calories, proteinG: snap.targets.proteinG },
+    goal: ctx.user.goal,
+    targets: { calories: ctx.targets.calories, proteinG: ctx.targets.proteinG },
     today: {
-      caloriesLogged: snap.today.caloriesLogged,
-      proteinG: snap.today.proteinG,
-      mealsLogged: snap.today.mealsLogged,
+      caloriesLogged: ctx.today.caloriesLogged,
+      proteinG: ctx.today.proteinG,
+      mealsLogged: ctx.today.mealsLogged,
     },
     state: {
-      plateauStatus: snap.state.plateauStatus,
-      behaviorFlags: snap.state.behaviorFlags,
-      trendStatus: snap.state.trendStatus,
-      adherenceScore: snap.state.adherenceScore,
-      adherencePct7d: snap.progress.adherencePct7d,
-      loggingStreak: snap.streak.currentDays,
-      weightTrendKgWk: snap.progress.weightTrendKg,
-      // The nudge channel never makes a plan change, so weight-point count is moot here.
-      weightDataPoints: snap.progress.weightTrendKg === null ? 0 : 3,
+      plateauStatus: s.plateauStatus as PlateauStatus,
+      behaviorFlags: s.behaviorFlags as BehaviorFlag[],
+      trendStatus: s.trendStatus,
+      adherenceScore: s.adherenceScore,
+      adherencePct7d: s.adherencePct7d ?? 0,
+      loggingStreak: s.streaks.loggingDays,
+      weightTrendKgWk: s.weight.trendKgPerWeek,
+      weightDataPoints: s.weight.dataPoints,
     },
   };
 }
 
-/** Empty-state input so a decision (STEADY) exists even before the snapshot loads. */
+/** Empty-state input so a decision (STEADY) exists even before the context loads. */
 function neutralInput(): RecommendationInput {
   return {
     goal: 'maintain',
@@ -168,21 +173,22 @@ function neutralInput(): RecommendationInput {
   };
 }
 
-function toCompactSnapshot(snap: UserSnapshot, reason: RecommendationReason): Record<string, unknown> {
+function toCompactSnapshot(ctx: CoachingContext, reason: RecommendationReason): Record<string, unknown> {
   return {
     reason,
-    goal: snap.goal,
-    persona: snap.persona,
-    calRemaining: snap.targets.calories - snap.today.caloriesLogged,
-    protRemaining: snap.targets.proteinG - snap.today.proteinG,
-    mealsLogged: snap.today.mealsLogged,
-    streak: snap.streak.currentDays,
-    adherence7d: snap.progress.adherencePct7d,
-    weightTrend: snap.progress.weightTrendKg,
-    adherenceScore: snap.state.adherenceScore,
-    nutritionScore: snap.state.nutritionScore,
-    plateauStatus: snap.state.plateauStatus,
-    behaviorFlags: snap.state.behaviorFlags,
-    trendStatus: snap.state.trendStatus,
+    contractVersion: ctx.meta.version,
+    goal: ctx.user.goal,
+    persona: ctx.user.persona,
+    calRemaining: ctx.targets.calories - ctx.today.caloriesLogged,
+    protRemaining: ctx.targets.proteinG - ctx.today.proteinG,
+    mealsLogged: ctx.today.mealsLogged,
+    streak: ctx.currentState.streaks.loggingDays,
+    adherence7d: ctx.currentState.adherencePct7d,
+    weightTrend: ctx.currentState.weight.trendKgPerWeek,
+    adherenceScore: ctx.currentState.adherenceScore,
+    nutritionScore: ctx.currentState.nutritionScore,
+    plateauStatus: ctx.currentState.plateauStatus,
+    behaviorFlags: ctx.currentState.behaviorFlags,
+    trendStatus: ctx.currentState.trendStatus,
   };
 }

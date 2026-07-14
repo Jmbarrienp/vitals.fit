@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { NutritionStateService } from './nutrition-state.service';
 import { WeeklyLedgerService } from './weekly-ledger.service';
 import { WeeklyReviewService } from './weekly-review.service';
+import { CoachingContextService } from './coaching-context.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('nutrition-state')
@@ -11,6 +12,7 @@ export class NutritionStateController {
     private readonly state: NutritionStateService,
     private readonly ledger: WeeklyLedgerService,
     private readonly review: WeeklyReviewService,
+    private readonly coaching: CoachingContextService,
   ) {}
 
   /** Read-only compact intelligence snapshot for the mobile UI (present state). */
@@ -38,5 +40,15 @@ export class NutritionStateController {
   @Get('weekly-review')
   getWeeklyReview(@Request() req: { user: { id: string } }) {
     return this.review.getReviewSnapshot(req.user.id);
+  }
+
+  /**
+   * The model-agnostic intelligence contract (Phase 2C.0) — the exact snapshot
+   * any LLM consumes. Read-only; exposed for inspection, debugging, and future
+   * consumers. Contains no ids and no raw logs.
+   */
+  @Get('coaching-context')
+  getCoachingContext(@Request() req: { user: { id: string } }) {
+    return this.coaching.build(req.user.id, 'full');
   }
 }

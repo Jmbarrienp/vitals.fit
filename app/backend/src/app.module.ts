@@ -15,6 +15,7 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
 import { OrchestratorModule } from './orchestrator/orchestrator.module';
 import { FoodModule } from './food/food.module';
 import { NutritionStateModule } from './nutrition-state/nutrition-state.module';
+import { CoachModule } from './coach/coach.module';
 
 @Module({
   controllers: [AppController],
@@ -34,6 +35,7 @@ import { NutritionStateModule } from './nutrition-state/nutrition-state.module';
     OrchestratorModule,
     FoodModule,
     NutritionStateModule,
+    CoachModule,
   ],
 })
 export class AppModule {}

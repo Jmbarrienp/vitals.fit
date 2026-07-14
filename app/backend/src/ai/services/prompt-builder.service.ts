@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { UserSnapshot } from '../../recommendations/types/user-snapshot';
+import { CoachingContext } from '../../nutrition-state/types/coaching-context';
+import { renderCoachingContext } from '../../nutrition-state/coaching-context.render';
 
+/**
+ * Prompt assembly for the model adapter (Phase 2C.0). Data selection no longer
+ * lives here: the user prompt body is the CANONICAL rendering of the
+ * CoachingContext (the model-agnostic contract), so this service only owns the
+ * INSTRUCTIONS — the one piece that is per-task, not per-model or per-schema.
+ */
 @Injectable()
 export class PromptBuilderService {
   private static readonly SYSTEM_PROMPT = `Eres el motor de recomendaciones de Vitals Fit.
@@ -12,33 +19,15 @@ REGLAS ESTRICTAS DE SALIDA:
 - Sin frases motivacionales genéricas ("¡Sigue así!", "¡Buen trabajo!").
 - Texto plano, directo, accionable.
 - Siempre menciona un alimento concreto o una cantidad específica.
-- Si el usuario va bien, confirma qué mantener. Si va mal, di exactamente qué ajustar.`;
+- Si el usuario va bien, confirma qué mantener. Si va mal, di exactamente qué ajustar.
+- Si hay un compromiso activo o un próximo foco, tu recomendación debe apuntar a eso.`;
 
   getSystemPrompt(): string {
     return PromptBuilderService.SYSTEM_PROMPT;
   }
 
-  buildUserPrompt(snap: UserSnapshot): string {
-    const calRem = snap.targets.calories - snap.today.caloriesLogged;
-    const protRem = snap.targets.proteinG - snap.today.proteinG;
-
-    const trendStr =
-      snap.progress.weightTrendKg !== null
-        ? `${snap.progress.weightTrendKg > 0 ? '+' : ''}${snap.progress.weightTrendKg}kg`
-        : 'sin datos';
-
-    const mealsStr =
-      snap.today.recentMeals.length > 0
-        ? snap.today.recentMeals
-            .map((m) => `${m.mealType}: ${m.name} (${m.calories}kcal)`)
-            .join(', ')
-        : 'ninguna registrada';
-
-    return `Meta: ${snap.goal} | Persona: ${snap.persona} | Sexo: ${snap.sex}
-Calorías restantes hoy: ${calRem} kcal (${snap.today.caloriesLogged}/${snap.targets.calories}) | TDEE: ${snap.targets.tdee}
-Proteína restante: ${protRem}g (${snap.today.proteinG}/${snap.targets.proteinG}g)
-Carbos: ${snap.today.carbsG}/${snap.targets.carbsG}g | Grasa: ${snap.today.fatG}/${snap.targets.fatG}g
-Últimas comidas: ${mealsStr}
-Racha: ${snap.streak.currentDays} días | Adherencia 7d: ${snap.progress.adherencePct7d}% | Tendencia peso: ${trendStr}`;
+  /** The user prompt = the contract, rendered canonically. Deterministic. */
+  buildUserPrompt(ctx: CoachingContext): string {
+    return renderCoachingContext(ctx);
   }
 }

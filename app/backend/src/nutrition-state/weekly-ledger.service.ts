@@ -116,15 +116,16 @@ export class WeeklyLedgerService {
     let appended = 0;
     for (const weekStart of missing) {
       const data = buildWeek(userId, weekStart, goal as LedgerGoal, logs as LedgerLog[], weights, recs, prev);
-      // unique(userId, weekStart) + empty update = idempotent and never-mutating,
-      // even under a concurrent writer.
-      const row = await this.prisma.weeklyNutritionSnapshot.upsert({
-        where: { userId_weekStart: { userId, weekStart } },
-        create: data,
-        update: {},
-      });
-      prev = row;
-      appended++;
+      // Append-only + never-mutating. createMany(skipDuplicates) compiles to an
+      // atomic INSERT ... ON CONFLICT DO NOTHING, so a concurrent backfill of the
+      // same user (two requests, or the context composer) can't collide or rewrite
+      // an existing week. Re-read to carry `prev` forward for primaryImprovement.
+      const { count } = await this.prisma.weeklyNutritionSnapshot.createMany({ data, skipDuplicates: true });
+      prev =
+        (await this.prisma.weeklyNutritionSnapshot.findUnique({
+          where: { userId_weekStart: { userId, weekStart } },
+        })) ?? prev;
+      appended += count;
     }
     return appended;
   }
@@ -140,7 +141,7 @@ function buildWeek(
   weights: LedgerWeight[],
   recs: LedgerRec[],
   prev: WeeklyNutritionSnapshot | null,
-): Prisma.WeeklyNutritionSnapshotUncheckedCreateInput {
+): Prisma.WeeklyNutritionSnapshotCreateManyInput {
   const weekEndExcl = addDaysUTC(weekStart, 7); // exclusive
   const weekLastDay = addDaysUTC(weekStart, 6); // Sunday — streak/trend anchor
   const ctxStart = addDaysUTC(weekEndExcl, -CONTEXT_DAYS);

@@ -283,3 +283,30 @@ export interface ReviewSnapshot {
   retention: RetentionMetrics;
   nextPriorities: NextPriority[];
 }
+
+// ── Weekly Coach (2C.1) ──
+// AI coaching over the model-agnostic contract. The structure is deterministic
+// and backend-owned; a model only rephrases. Rendered as-is; the client computes nothing.
+export interface WeeklyCoachOutput {
+  summary: string;
+  diagnosis: string;
+  nextAction: string;
+  optionalFollowUp: string | null;
+  meta: {
+    source: 'deterministic' | 'claude';
+    outputVersion: number;
+    promptVersion: number | null;
+    grounding: {
+      weekStart: string | null;
+      primaryReason: string | null;
+      nextPriorityBasis: string | null;
+      biggestImprovement: string | null;
+      contractVersion: number;
+    };
+  };
+}
+
+export interface WeeklyCoachResult {
+  hasCoaching: boolean;
+  output: WeeklyCoachOutput | null;
+}
