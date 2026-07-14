@@ -310,3 +310,43 @@ export interface WeeklyCoachResult {
   hasCoaching: boolean;
   output: WeeklyCoachOutput | null;
 }
+
+// ── Adaptive Meal Plan (2D.1) ──
+// The execution layer: the planner's strategy turned into concrete meals from the
+// user's own foods. Rendered as-is; the client computes nothing.
+export type MealSlot = 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
+export type FoodSource = 'favorite' | 'frequent' | 'recent' | 'custom' | 'catalog';
+
+export interface MealItem {
+  foodId: string;
+  name: string;
+  source: FoodSource;
+  grams: number;
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
+export interface PlannedMeal {
+  slot: MealSlot;
+  name: string;
+  targetCalories: number;
+  targetProteinG: number;
+  items: MealItem[];
+  totalCalories: number;
+  totalProteinG: number;
+}
+
+export interface MealPlan {
+  meta: { planner: string; version: number; contractVersion: number; plannerVersion: number; generatedAt: string };
+  targets: { source: 'planner-adjusted' | 'current-goal'; calories: number; proteinG: number; carbsG: number; fatG: number };
+  meals: PlannedMeal[];
+  totals: { calories: number; proteinG: number; carbsG: number; fatG: number };
+  adaptations: string[];
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+  rationale: { drivers: string[]; summary: string };
+  coverage: { fromUserFoods: number; totalItems: number };
+  reviewWindowDays: number;
+  reviewDate: string;
+}

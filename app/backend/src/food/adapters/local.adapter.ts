@@ -178,6 +178,16 @@ export class LocalFoodAdapter implements FoodAdapter {
       .map((f) => this.normalize(f, favIds.has(f.id)));
   }
 
+  /** Private custom foods this user created (deterministic order; may be unlogged). */
+  async getCustom(userId: string): Promise<NormalizedFood[]> {
+    const items = await this.prisma.foodItem.findMany({
+      where: { createdByUserId: userId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+    });
+    const favIds = await this.favoriteIdSet(userId);
+    return items.map((i) => this.normalize(i, favIds.has(i.id)));
+  }
+
   async getFavorites(userId: string): Promise<NormalizedFood[]> {
     const favs = await this.prisma.foodFavorite.findMany({
       where: { userId },

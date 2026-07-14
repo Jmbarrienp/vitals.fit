@@ -30,6 +30,11 @@ export class FoodService {
     return this.adapter.getFavorites(userId);
   }
 
+  /** Private custom foods the user created (for the meal planner's candidate pool). */
+  getCustom(userId: string) {
+    return this.adapter.getCustom(userId);
+  }
+
   async addFavorite(userId: string, foodItemId: string) {
     await this.adapter.addFavorite(userId, foodItemId);
     return { ok: true };

@@ -17,6 +17,7 @@ import { FoodModule } from './food/food.module';
 import { NutritionStateModule } from './nutrition-state/nutrition-state.module';
 import { CoachModule } from './coach/coach.module';
 import { PlannerModule } from './planner/planner.module';
+import { MealPlannerModule } from './meal-planner/meal-planner.module';
 
 @Module({
   controllers: [AppController],
@@ -38,6 +39,7 @@ import { PlannerModule } from './planner/planner.module';
     NutritionStateModule,
     CoachModule,
     PlannerModule,
+    MealPlannerModule,
   ],
 })
 export class AppModule {}
