@@ -17,7 +17,8 @@
     "smoke:ledger": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-ledger.ts",
     "smoke:review": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-review.ts",
     "smoke:contract": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-contract.ts",
-    "smoke:coach": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-coach.ts"
+    "smoke:coach": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-coach.ts",
+    "smoke:planner": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-planner.ts"
   },
   "keywords": [],
   "author": "",
