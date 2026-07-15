@@ -35,8 +35,28 @@ export function validateRecognitionResult(raw: unknown): ValidationOutcome {
   if (r.detections.length > MAX_DETECTIONS) errors.push(`too many detections (> ${MAX_DETECTIONS})`);
   r.detections.forEach((d, i) => errors.push(...validateDetection(d, i)));
 
+  // V3.4 — scene is an OPTIONAL enhancement, so it gets a different failure
+  // policy than the core result: a malformed scene is stripped at this gate
+  // (the cue is expendable) instead of failing the scan (which would give the
+  // user a worse experience than manual entry over a hint they never asked
+  // for). Nothing malformed passes; the scan itself is not hostage to it.
+  if (r.scene !== undefined && !isValidScene(r.scene)) {
+    delete r.scene;
+  }
+
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, errors: [], result: raw as unknown as RecognitionResult };
+}
+
+const SCENE_SETTINGS = ['RESTAURANT', 'HOME', 'UNKNOWN'];
+
+function isValidScene(s: unknown): boolean {
+  if (!isObject(s)) return false;
+  if (typeof s.setting !== 'string' || !SCENE_SETTINGS.includes(s.setting)) return false;
+  if (!isProbability(s.confidence)) return false;
+  if (s.restaurantName !== null && typeof s.restaurantName !== 'string') return false;
+  if (s.category !== null && typeof s.category !== 'string') return false;
+  return true;
 }
 
 function validateDetection(d: unknown, i: number): string[] {

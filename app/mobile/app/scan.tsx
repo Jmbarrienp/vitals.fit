@@ -5,7 +5,7 @@ import { Card } from '../src/components/Card';
 import { Button } from '../src/components/Button';
 import { useVisionCapture } from '../src/hooks/useVisionCapture';
 import { bandCopy, modeCopy } from '../src/lib/vision';
-import type { FoodCandidate, ScanConfirmationItem } from '../src/types/vision';
+import type { FoodCandidate, MenuCandidate, RestaurantContext, ScanConfirmationItem } from '../src/types/vision';
 
 /**
  * Nutrition Vision V1 — camera capture + proposal review. Vision proposes; the
@@ -17,6 +17,8 @@ export default function ScanScreen() {
   const router = useRouter();
   const { state, proposal, error, capture, confirm, reject, fallbackToManual } = useVisionCapture();
   const [included, setIncluded] = useState<Set<number>>(new Set());
+  // V3.4 — menu candidates the user tapped (indices into restaurant.menuCandidates).
+  const [menuPicked, setMenuPicked] = useState<Set<number>>(new Set());
 
   // Auto-launch the camera once when the screen opens.
   useEffect(() => {
@@ -44,6 +46,25 @@ export default function ScanScreen() {
         grams: c.portion.grams,
         acceptedFromCandidate: c.detectionIndex,
       }));
+    // V3.4 — picked menu dishes go in as one-off items with their PUBLISHED
+    // nutrition only. Nothing is computed here: unpublished macros stay unsent
+    // and the backend's existing one-off convention applies.
+    for (const idx of menuPicked) {
+      const dish = proposal.restaurant?.menuCandidates[idx];
+      if (!dish || dish.calories == null) continue;
+      items.push({
+        foodItemId: null,
+        customName: dish.name,
+        quantity: dish.servingGrams ?? 1,
+        unit: dish.servingGrams ? 'g' : 'serving',
+        grams: dish.servingGrams ?? undefined,
+        calories: dish.calories,
+        proteinG: dish.proteinG ?? undefined,
+        carbsG: dish.carbsG ?? undefined,
+        fatG: dish.fatG ?? undefined,
+        acceptedFromCandidate: null,
+      });
+    }
     if (items.length === 0) {
       Alert.alert('Nada que registrar', 'Selecciona al menos un alimento reconocido, o regístralo a mano.');
       return;
@@ -85,11 +106,20 @@ export default function ScanScreen() {
         )}
 
         {state === 'proposed' && proposal && (
-          <Proposal
-            proposal={proposal}
-            included={included}
-            onToggle={(i) => setIncluded((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })}
-          />
+          <>
+            {proposal.restaurant && (
+              <RestaurantBanner
+                restaurant={proposal.restaurant}
+                picked={menuPicked}
+                onToggle={(i) => setMenuPicked((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+              />
+            )}
+            <Proposal
+              proposal={proposal}
+              included={included}
+              onToggle={(i) => setIncluded((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+            />
+          </>
         )}
 
         {state === 'confirming' && (
@@ -155,6 +185,67 @@ function CandidateRow({ c, checked, onToggle }: { c: FoodCandidate; checked: boo
         <Text className="text-text-primary text-sm">{c.displayName}</Text>
         <Text className="text-text-muted text-[10px]">
           {matched ? `~${c.portion.grams}g${portionHint(c)}` : 'no reconocido — regístralo a mano'}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * V3.4 — restaurant context banner. The backend decided whether the signal was
+ * strong enough to show; this renders it. Menu dishes with published calories
+ * are tappable (they log as one-off items on confirm); dishes without published
+ * nutrition are name-only hints — the platform never invents a number to make
+ * something tappable.
+ */
+function RestaurantBanner({
+  restaurant, picked, onToggle,
+}: {
+  restaurant: RestaurantContext;
+  picked: Set<number>;
+  onToggle: (i: number) => void;
+}) {
+  return (
+    <Card className="mb-3">
+      <Text className="text-text-primary text-sm font-semibold">
+        🍽️ {restaurant.restaurantName ?? 'Parece comida de restaurante'}
+      </Text>
+      <Text className="text-text-muted text-[10px] mb-1">
+        {restaurant.category ? `Cocina: ${restaurant.category} · ` : ''}Contexto detectado en la foto — confírmalo tú.
+      </Text>
+      {restaurant.menuCandidates.length > 0 && (
+        <>
+          <Text className="text-text-muted text-xs mt-1 mb-1">¿Pediste alguno de estos platos del menú?</Text>
+          {restaurant.menuCandidates.map((dish: MenuCandidate, i: number) => (
+            <MenuDishRow key={`${dish.name}-${i}`} dish={dish} checked={picked.has(i)} onToggle={() => onToggle(i)} />
+          ))}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function MenuDishRow({ dish, checked, onToggle }: { dish: MenuCandidate; checked: boolean; onToggle: () => void }) {
+  const loggable = dish.calories != null;
+  return (
+    <TouchableOpacity
+      className="flex-row items-center py-2 border-b border-border"
+      onPress={loggable ? onToggle : undefined}
+      activeOpacity={loggable ? 0.7 : 1}
+    >
+      <View className="w-6">
+        {loggable ? (
+          <Text className="text-lg" style={{ color: checked ? '#6366f1' : '#475569' }}>{checked ? '☑' : '☐'}</Text>
+        ) : (
+          <Text className="text-lg text-text-muted">•</Text>
+        )}
+      </View>
+      <View className="flex-1">
+        <Text className="text-text-primary text-sm">{dish.name}</Text>
+        <Text className="text-text-muted text-[10px]">
+          {loggable
+            ? `${dish.calories} kcal publicadas${dish.proteinG != null ? ` · P${dish.proteinG} C${dish.carbsG} G${dish.fatG}` : ' · sin macros publicados'}`
+            : 'sin datos publicados — regístralo a mano'}
         </Text>
       </View>
     </TouchableOpacity>

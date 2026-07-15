@@ -1,4 +1,4 @@
-import { Detection } from '../types/vision-contract';
+import { Detection, SceneContext } from '../types/vision-contract';
 
 /**
  * The vendor-shaped half of the Claude vision adapter (Phase 2D.2 V2), kept in
@@ -15,7 +15,7 @@ import { Detection } from '../types/vision-contract';
  */
 
 /** Bump when the prompt or schema changes shape — travels as `RecognitionResult.providerVersion` for eval attribution. */
-export const VISION_PROMPT_VERSION = '1.0.0';
+export const VISION_PROMPT_VERSION = '1.1.0'; // 1.1.0: V3.4 scene block (restaurant context)
 
 export const VISION_SYSTEM_PROMPT = `Eres un sistema de reconocimiento visual de alimentos. Analizas una foto de una comida y devuelves los alimentos que ves.
 
@@ -27,6 +27,11 @@ REGLAS:
 - "portionGrams": tu mejor estimación del peso comestible en gramos. Si genuinamente no puedes estimar la porción, devuelve 0 — el sistema aplicará una porción estándar. NUNCA inventes un número para rellenar.
 - "portionConfidence": 0..1. Qué tan seguro estás de los gramos. Sin referencia de escala (cubiertos, mano, plato conocido) esto debe ser bajo.
 - "attributes": etiquetas cortas opcionales que ayuden al usuario a confirmar: "packaged", "homemade", "liquid", "fried", "raw". Lista vacía si no aplica.
+- "scene": el CONTEXTO de la foto, además de los alimentos:
+  - "setting": "RESTAURANT" si el entorno parece un restaurante (vajilla comercial, menú visible, mesa de local, empaque de delivery), "HOME" si parece cocina/mesa de casa, "UNKNOWN" si no puedes distinguirlo.
+  - "confidence": 0..1 sobre el setting. Sin señales claras, usa "UNKNOWN" con 0.
+  - "restaurantName": el nombre del restaurante SOLO si es literalmente legible en la imagen (letrero, menú, servilleta, empaque). Si no lo ves escrito, devuelve "". NUNCA lo adivines por el estilo de la comida.
+  - "category": tipo de cocina si es evidente (ej: "tacos", "italiana", "sushi"), o "".
 
 NO hagas nada de esto:
 - No calcules calorías, proteínas, carbohidratos ni grasas. No es tu trabajo y el sistema los ignora.
@@ -79,8 +84,20 @@ export const DETECTION_SCHEMA: Record<string, unknown> = {
         additionalProperties: false,
       },
     },
+    scene: {
+      type: 'object',
+      description: 'Contexto de la foto. UNKNOWN con confidence 0 si no es distinguible.',
+      properties: {
+        setting: { type: 'string', enum: ['RESTAURANT', 'HOME', 'UNKNOWN'] },
+        confidence: { type: 'number', description: 'Confianza 0..1 en el setting.' },
+        restaurantName: { type: 'string', description: 'Nombre SOLO si es legible en la imagen; "" si no.' },
+        category: { type: 'string', description: 'Tipo de cocina si es evidente; "" si no.' },
+      },
+      required: ['setting', 'confidence', 'restaurantName', 'category'],
+      additionalProperties: false,
+    },
   },
-  required: ['detections'],
+  required: ['detections', 'scene'],
   additionalProperties: false,
 };
 
@@ -127,6 +144,32 @@ export function parseDetections(payload: unknown): Detection[] {
     detections.push(detection);
   }
   return detections;
+}
+
+const MAX_SCENE_NAME_CHARS = 120;
+
+/**
+ * Vendor JSON -> platform `SceneContext` (V3.4). PURE and total, like
+ * `parseDetections`: malformed input yields `undefined` (no scene), never a
+ * throw. Empty-string sentinels (the structured-output schema requires every
+ * slot) become nulls here, so nothing downstream ever sees a vendor sentinel.
+ */
+export function parseScene(payload: unknown): SceneContext | undefined {
+  if (!isObject(payload) || !isObject(payload.scene)) return undefined;
+  const s = payload.scene as Record<string, unknown>;
+  const setting = s.setting === 'RESTAURANT' || s.setting === 'HOME' ? s.setting : 'UNKNOWN';
+  return {
+    setting,
+    confidence: clamp01(s.confidence),
+    restaurantName: toSceneName(s.restaurantName),
+    category: toSceneName(s.category),
+  };
+}
+
+function toSceneName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().slice(0, MAX_SCENE_NAME_CHARS);
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function toBoundingBox(value: unknown): Detection['boundingBox'] | null {

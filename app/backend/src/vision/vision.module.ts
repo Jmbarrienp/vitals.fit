@@ -16,6 +16,9 @@ import { OCRProviderRegistry } from './ocr/ocr-provider.registry';
 import { FixtureOCRProvider } from './ocr/fixture-ocr.provider';
 import { ClaudeOCRProvider } from './ocr/claude-ocr.provider';
 import { PortionPriorReader } from './priors/portion-prior.reader';
+import { RestaurantMenuProviderRegistry } from './restaurant/restaurant-menu.registry';
+import { NullRestaurantMenuProvider } from './restaurant/null-restaurant-menu.provider';
+import { FixtureRestaurantMenuProvider } from './restaurant/fixture-restaurant-menu.provider';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -78,6 +81,20 @@ import { PortionPriorReader } from './priors/portion-prior.reader';
       useFactory: (config: ConfigService, fixture: FixtureOCRProvider, claude: ClaudeOCRProvider) =>
         new OCRProviderRegistry(config, [fixture, claude]),
       inject: [ConfigService, FixtureOCRProvider, ClaudeOCRProvider],
+    },
+
+    // Restaurant menu sources (V3.4) — fourth registry, same swap-by-config
+    // pattern. Default is 'none' (always not-found): no free keyless menu API
+    // exists today, so production stays inert until one is deliberately
+    // configured. Restaurant CONTEXT still works with it — only the menu
+    // candidates are absent.
+    NullRestaurantMenuProvider,
+    FixtureRestaurantMenuProvider,
+    {
+      provide: RestaurantMenuProviderRegistry,
+      useFactory: (config: ConfigService, none: NullRestaurantMenuProvider, fixture: FixtureRestaurantMenuProvider) =>
+        new RestaurantMenuProviderRegistry(config, [none, fixture]),
+      inject: [ConfigService, NullRestaurantMenuProvider, FixtureRestaurantMenuProvider],
     },
   ],
   controllers: [VisionController],

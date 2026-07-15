@@ -95,6 +95,30 @@ export interface VisionScanProposal {
   contractVersion: number;
   /** Present only for LABEL_OCR scans (V3.2). */
   label?: NutritionLabel;
+  /** Present only when a PHOTO scan confidently detected a restaurant (V3.4). */
+  restaurant?: RestaurantContext;
+}
+
+/** One dish a menu source knows (V3.4). Macros are PUBLISHED-or-null, never derived. */
+export interface MenuCandidate {
+  name: string;
+  calories: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  servingGrams: number | null;
+}
+
+/**
+ * Restaurant context (V3.4) — present only when the backend's scene signal
+ * cleared its confidence threshold. A drafting aid, never a source of truth;
+ * absence means the scan behaves exactly like a home-cooked photo.
+ */
+export interface RestaurantContext {
+  restaurantName: string | null;
+  category: string | null;
+  confidence: number;
+  menuCandidates: MenuCandidate[];
 }
 
 /** Isomorphic to LogMealDto.items — confirmation converges on the existing write path. */

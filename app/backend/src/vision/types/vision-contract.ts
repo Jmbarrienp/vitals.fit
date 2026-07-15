@@ -8,6 +8,7 @@
  */
 
 import { NutritionLabel } from './ocr-contract';
+import { RestaurantContext } from './restaurant-contract';
 
 export const VISION_CONTRACT_VERSION = 1;
 
@@ -75,12 +76,35 @@ export interface Detection {
   attributes?: string[]; // 'packaged' | 'homemade' | 'liquid' | … growable
 }
 
+/**
+ * Scene-level perception (V3.4) — where the meal appears to be, read from the
+ * SAME photo in the SAME provider call as the detections. This is perception,
+ * never nutrition: a setting, a confidence, and at most a name the provider can
+ * literally see (signage, menu, branded plating). UNKNOWN with confidence 0 is
+ * the honest default. The vocabulary is growable (String semantics, lesson 2B.1).
+ */
+export type SceneSetting = 'RESTAURANT' | 'HOME' | 'UNKNOWN';
+
+export interface SceneContext {
+  setting: SceneSetting;
+  confidence: number; // 0..1 — how sure the provider is about the SETTING
+  restaurantName: string | null; // only if literally visible in the image; never guessed
+  category: string | null; // cuisine/menu category cue, e.g. 'tacos', 'italiana'
+}
+
 /** What a VisionProvider returns. Provider-agnostic: labels only, never nutrition math. */
 export interface RecognitionResult {
   providerId: string;
   model: string;
   providerVersion: string;
   detections: Detection[]; // [] = nothing recognized — a valid, handled outcome
+  /**
+   * V3.4 — optional scene perception. Additive: pre-V3.4 providers never set it
+   * and every consumer treats absence as UNKNOWN. Validated at the same gate as
+   * detections; a malformed scene is STRIPPED (the cue is expendable, the scan
+   * is not) rather than failing the scan.
+   */
+  scene?: SceneContext;
   latencyMs: number;
   raw?: unknown; // stored for audit/eval; never consumed by downstream logic
 }
@@ -140,6 +164,14 @@ export interface VisionScanProposal {
    * EDITABLE fields; the user confirms every number before anything is logged.
    */
   label?: NutritionLabel;
+  /**
+   * V3.4 — restaurant context, present ONLY when the scene signal cleared the
+   * confidence threshold. A signal that improves drafting quality, never a new
+   * source of truth: menu candidates carry published nutrition or null, the
+   * user confirms everything, and confirmation converges on the same write
+   * path. Absence = the fallback state (a normal photo scan).
+   */
+  restaurant?: RestaurantContext;
 }
 
 /** What confirmation sends back. Deliberately isomorphic to LogMealDto.items. */

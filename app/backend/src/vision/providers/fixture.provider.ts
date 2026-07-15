@@ -37,6 +37,20 @@ export class FixtureVisionProvider implements VisionProvider {
       );
     }
 
+    // V3.4 — restaurant scenes. Same plate as the chicken ref (so catalog
+    // matching exercises the SAME pipeline), plus scene-level perception.
+    // 'faint' simulates a weak signal that must NOT clear the threshold.
+    if (ref.includes('restaurant')) {
+      const detections = [
+        { label: 'pollo a la plancha', labelConfidence: 0.9, portionHint: { grams: 200, confidence: 0.6 } },
+        { label: 'arroz blanco', labelConfidence: 0.82, portionHint: { grams: 180, confidence: 0.55 } },
+      ];
+      const scene = ref.includes('faint')
+        ? { setting: 'RESTAURANT' as const, confidence: 0.3, restaurantName: null, category: null }
+        : { setting: 'RESTAURANT' as const, confidence: 0.85, restaurantName: 'La Esquina Criolla', category: 'latam casera' };
+      return { ...this.result(detections, req.imageRef), scene };
+    }
+
     if (ref.includes('chicken') || ref.includes('pollo')) {
       return this.result(
         [

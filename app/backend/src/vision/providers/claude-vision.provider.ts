@@ -10,6 +10,7 @@ import {
   VISION_SYSTEM_PROMPT,
   VISION_USER_PROMPT,
   parseDetections,
+  parseScene,
 } from './claude-vision.prompt';
 
 const TIMEOUT_MS = 25_000; // vision + a full image is slower than the coach's text call
@@ -112,6 +113,7 @@ export class ClaudeVisionProvider implements VisionProvider {
       model: this.model,
       providerVersion: VISION_PROMPT_VERSION,
       detections: parseDetections(payload),
+      scene: parseScene(payload),
       latencyMs,
       // Audit only, and never persisted by the service. Deliberately excludes the
       // prompt and the response text so no vendor payload can leak through `raw`.

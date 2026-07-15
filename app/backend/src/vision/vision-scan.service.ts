@@ -16,6 +16,9 @@ import { BarcodeLookupProviderRegistry } from './barcode/barcode-lookup.registry
 import { OCRProviderRegistry } from './ocr/ocr-provider.registry';
 import { PortionPriorReader } from './priors/portion-prior.reader';
 import { PortionPriorInputs } from './pipeline/portion-engine';
+import { RestaurantMenuProviderRegistry } from './restaurant/restaurant-menu.registry';
+import { deriveRestaurantContext } from './pipeline/restaurant-context';
+import { MenuLookupResult, RestaurantContext } from './types/restaurant-contract';
 import {
   VISION_EVENTS,
   VisionScanConfirmedEvent,
@@ -46,6 +49,8 @@ const BARCODE_LOOKUP_TIMEOUT_MS = 15_000;
 const BARCODE_SCAN_IMAGE_REF_PLACEHOLDER = 'barcode-scan';
 /** Outer backstop for OCR, looser than the adapter's own 25s — same discipline as RECOGNIZE_TIMEOUT_MS. */
 const OCR_TIMEOUT_MS = 30_000;
+/** Menu lookup (V3.4) is pure enhancement: short leash, and a timeout NEVER degrades the scan. */
+const MENU_LOOKUP_TIMEOUT_MS = 8_000;
 /** How many catalog matches to offer as alternates when a label carries a product name. */
 const LABEL_ALTERNATE_LIMIT = 3;
 
@@ -71,6 +76,7 @@ export class VisionScanService {
     private readonly barcodeLookups: BarcodeLookupProviderRegistry,
     private readonly ocrProviders: OCRProviderRegistry,
     private readonly priors: PortionPriorReader,
+    private readonly menuProviders: RestaurantMenuProviderRegistry,
   ) {}
 
   /**
@@ -157,6 +163,28 @@ export class VisionScanService {
       );
       const fallbackReason = candidates.length === 0 ? 'NO_DETECTIONS' : null;
 
+      // V3.4 — restaurant context. A signal, never truth: the threshold policy
+      // lives in the pure module (below it the proposal carries nothing and the
+      // scan is an ordinary photo scan). The menu lookup fails SOFT — a menu
+      // source outage or timeout costs the menu candidates, never the scan.
+      let restaurant: RestaurantContext | null = null;
+      if (deriveRestaurantContext(result.scene, null) !== null) {
+        let menu: MenuLookupResult | null = null;
+        try {
+          menu = await withTimeout(
+            this.menuProviders.active().lookup({
+              restaurantName: result.scene!.restaurantName,
+              category: result.scene!.category,
+              detectionLabels: result.detections.map((d) => d.label),
+            }),
+            MENU_LOOKUP_TIMEOUT_MS,
+          );
+        } catch {
+          menu = null;
+        }
+        restaurant = deriveRestaurantContext(result.scene, menu);
+      }
+
       const proposal: VisionScanProposal = {
         scanId: scan.id,
         status: 'PROPOSED', // even empty candidates is a valid proposal — mode steers to manual fallback
@@ -167,6 +195,7 @@ export class VisionScanService {
         suggestedMealType,
         fallback: { reason: fallbackReason },
         contractVersion: VISION_CONTRACT_VERSION,
+        ...(restaurant ? { restaurant } : {}),
       };
 
       await this.prisma.visionScan.update({

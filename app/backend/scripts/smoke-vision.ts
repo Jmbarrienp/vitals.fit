@@ -42,6 +42,7 @@ process.env.DIRECT_URL = LOCAL_URL;
 delete process.env.VISION_PROVIDER; // force default -> fixture
 delete process.env.BARCODE_LOOKUP_PROVIDER; // force default -> openfoodfacts (still overridden explicitly per-test below)
 delete process.env.OCR_PROVIDER; // force default -> fixture
+delete process.env.RESTAURANT_MENU_PROVIDER; // force default -> none (still overridden explicitly per-test below)
 
 const EmbeddedPostgres = require('embedded-postgres').default || require('embedded-postgres');
 const { Client } = require('pg');
@@ -54,7 +55,7 @@ import { LocalFoodAdapter } from '../src/food/adapters/local.adapter';
 import { LogsService } from '../src/logs/logs.service';
 import { FixtureVisionProvider } from '../src/vision/providers/fixture.provider';
 import { ClaudeVisionProvider } from '../src/vision/providers/claude-vision.provider';
-import { parseDetections, DETECTION_SCHEMA, VISION_SYSTEM_PROMPT } from '../src/vision/providers/claude-vision.prompt';
+import { parseDetections, parseScene, DETECTION_SCHEMA, VISION_SYSTEM_PROMPT } from '../src/vision/providers/claude-vision.prompt';
 import { EphemeralImageStore } from '../src/vision/images/ephemeral-image-store';
 import { VisionProviderRegistry } from '../src/vision/providers/provider.registry';
 import { VisionProvider } from '../src/vision/providers/vision-provider.port';
@@ -78,6 +79,10 @@ import { FixtureOCRProvider } from '../src/vision/ocr/fixture-ocr.provider';
 import { ClaudeOCRProvider } from '../src/vision/ocr/claude-ocr.provider';
 import { parseLabelExtraction, LABEL_SCHEMA, OCR_SYSTEM_PROMPT } from '../src/vision/ocr/claude-ocr.prompt';
 import { resolvePortion, PortionPriorInputs } from '../src/vision/pipeline/portion-engine';
+import { deriveRestaurantContext } from '../src/vision/pipeline/restaurant-context';
+import { RestaurantMenuProviderRegistry } from '../src/vision/restaurant/restaurant-menu.registry';
+import { NullRestaurantMenuProvider } from '../src/vision/restaurant/null-restaurant-menu.provider';
+import { FixtureRestaurantMenuProvider } from '../src/vision/restaurant/fixture-restaurant-menu.provider';
 import { median, mad, selectPrior, computeBias, historyWeight } from '../src/vision/pipeline/portion-priors';
 import { PortionPriorReader } from '../src/vision/priors/portion-prior.reader';
 import { inferMealType } from '../src/vision/pipeline/build-candidates';
@@ -432,6 +437,56 @@ async function main() {
   const absurdPrior: PortionPriorInputs = { userFoodGrams: [5000, 5000, 5000, 5000], userFoodMealTypeGrams: [], plannerExpectedGrams: null, visionBiasRatios: [] };
   check('blend clamped to plausible grams (shared 10..600 bounds)', resolvePortion(visionBase, absurdPrior).portion.grams <= 600);
 
+  console.log('\n── V3.4: RESTAURANT CONTEXT DERIVATION (pure — a signal, never truth) ──');
+  const restScene = { setting: 'RESTAURANT' as const, confidence: 0.85, restaurantName: 'La Esquina Criolla', category: 'latam casera' };
+  check('no scene -> no context', deriveRestaurantContext(undefined, null) === null);
+  check('HOME scene -> no context', deriveRestaurantContext({ ...restScene, setting: 'HOME' }, null) === null);
+  check('below-threshold restaurant scene -> dropped entirely (absence IS the fallback state)', deriveRestaurantContext({ ...restScene, confidence: 0.3 }, null) === null);
+  const bareCtx = deriveRestaurantContext(restScene, null);
+  check('confident scene without a menu source -> context with empty candidates', bareCtx !== null && bareCtx!.restaurantName === 'La Esquina Criolla' && bareCtx!.menuCandidates.length === 0);
+  const menuCtx = deriveRestaurantContext(restScene, {
+    found: true,
+    restaurantName: null,
+    items: [
+      { name: 'Plato A', calories: 620, proteinG: 48, carbsG: 55, fatG: 21, servingGrams: 450 },
+      { name: '   ', calories: 100, proteinG: null, carbsG: null, fatG: null, servingGrams: null },
+      { name: 'Plato con datos rotos', calories: -50, proteinG: 999999, carbsG: 10, fatG: 5, servingGrams: 200 },
+    ],
+  });
+  check('menu sanitization: nameless dropped; implausible numbers NULLED (discarded, never repaired)', menuCtx!.menuCandidates.length === 2 && menuCtx!.menuCandidates[1].calories === null && menuCtx!.menuCandidates[1].proteinG === null && menuCtx!.menuCandidates[1].carbsG === 10);
+  const manyDishes = Array.from({ length: 10 }, (_, i) => ({ name: `Plato ${i}`, calories: 100, proteinG: null, carbsG: null, fatG: null, servingGrams: null }));
+  check('menu candidates capped at 6 (a menu is a cue, not a catalog dump)', deriveRestaurantContext(restScene, { found: true, restaurantName: null, items: manyDishes })!.menuCandidates.length === 6);
+  check('lookup not-found -> context still present, zero candidates', deriveRestaurantContext(restScene, { found: false, restaurantName: null, items: [] })!.menuCandidates.length === 0);
+  check('name unreadable in image -> menu source canonical name fills in', deriveRestaurantContext({ ...restScene, restaurantName: null }, { found: true, restaurantName: 'Sucursal Centro', items: [] })!.restaurantName === 'Sucursal Centro');
+  check('determinism: same inputs -> identical context', JSON.stringify(deriveRestaurantContext(restScene, null)) === JSON.stringify(deriveRestaurantContext(restScene, null)));
+
+  console.log('\n── V3.4: SCENE VALIDATION GATE (strip the cue, never the scan) ──');
+  const sceneOk = validateRecognitionResult({ providerId: 'x', model: 'm', providerVersion: '1', latencyMs: 1, detections: [], scene: restScene });
+  check('a valid scene passes the gate intact', sceneOk.valid === true && (sceneOk.result as any).scene?.restaurantName === 'La Esquina Criolla');
+  const sceneBad = validateRecognitionResult({ providerId: 'x', model: 'm', providerVersion: '1', latencyMs: 1, detections: [], scene: { setting: 'DISCO', confidence: 7 } });
+  check('a malformed scene is STRIPPED — the scan is never hostage to an optional cue', sceneBad.valid === true && (sceneBad.result as any).scene === undefined);
+  check('pre-V3.4 providers (no scene at all) validate unchanged', validateRecognitionResult({ providerId: 'x', model: 'm', providerVersion: '1', latencyMs: 1, detections: [] }).valid === true);
+
+  console.log('\n── V3.4: MENU REGISTRY + PROVIDERS + SCENE PARSER (pure) ──');
+  const noneProvider = new NullRestaurantMenuProvider();
+  const menuFixture = new FixtureRestaurantMenuProvider();
+  const defaultMenuRegistry = new RestaurantMenuProviderRegistry(new ConfigService({}), [noneProvider, menuFixture]);
+  check("default menu provider is 'none' — production stays inert until a real source exists", defaultMenuRegistry.active().id === 'none');
+  check('null provider always answers not-found', (await noneProvider.lookup({ restaurantName: 'X', category: null, detectionLabels: [] })).found === false);
+  const fixtureMenu = await menuFixture.lookup({ restaurantName: 'La Esquina Criolla', category: null, detectionLabels: ['pollo'] });
+  check('fixture menu answers a known restaurant with published data', fixtureMenu.found === true && fixtureMenu.items.length === 4 && fixtureMenu.items[0].calories === 620);
+  check('a dish without published nutrition carries nulls — never an invented number', fixtureMenu.items[3].calories === null && fixtureMenu.items[3].proteinG === null);
+  check('unknown restaurant -> not-found (a valid, handled outcome)', (await menuFixture.lookup({ restaurantName: 'Ghost Diner', category: null, detectionLabels: [] })).found === false);
+  check('config swaps the menu provider', new RestaurantMenuProviderRegistry(new ConfigService({ RESTAURANT_MENU_PROVIDER: 'fixture' }), [noneProvider, menuFixture]).active().id === 'fixture');
+  let menuSwapThrew = false;
+  try { new RestaurantMenuProviderRegistry(new ConfigService({ RESTAURANT_MENU_PROVIDER: 'ghost' }), [noneProvider]).active(); } catch { menuSwapThrew = true; }
+  check('unknown menu provider throws (fails loud, not silent)', menuSwapThrew === true);
+  const parsedScene = parseScene({ scene: { setting: 'RESTAURANT', confidence: 0.9, restaurantName: '', category: 'tacos' } });
+  check('parseScene: vendor sentinels ("") become nulls — nothing downstream sees a sentinel', parsedScene?.setting === 'RESTAURANT' && parsedScene?.restaurantName === null && parsedScene?.category === 'tacos');
+  check('parseScene: total — malformed payload yields undefined, never a throw', parseScene(null) === undefined && parseScene({ scene: 'nope' }) === undefined);
+  const weirdScene = parseScene({ scene: { setting: 'SPACESHIP', confidence: 9, restaurantName: 7, category: null } });
+  check('parseScene: unknown setting collapses to UNKNOWN, confidence clamped, bad name dropped', weirdScene?.setting === 'UNKNOWN' && weirdScene?.confidence === 1 && weirdScene?.restaurantName === null);
+
   // ── PART B: full lifecycle integration (embedded DB + fixture provider) ──
   console.log('\n── INTEGRATION (embedded Postgres + fixture provider) ──');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-vision-'));
@@ -452,7 +507,10 @@ async function main() {
   const barcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'fixture' }), [new FixtureBarcodeLookupProvider(), new OpenFoodFactsLookupProvider()]);
   const ocrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'fixture' }), [new FixtureOCRProvider()]);
   const priorReader = new PortionPriorReader(prisma);
-  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader);
+  // Fixture menu source for the main service — the restaurant flow is exercised
+  // end-to-end; the production default ('none') gets its own dedicated test.
+  const menuRegistry = new RestaurantMenuProviderRegistry(new ConfigService({ RESTAURANT_MENU_PROVIDER: 'fixture' }), [new NullRestaurantMenuProvider(), new FixtureRestaurantMenuProvider()]);
+  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry);
 
   const user = await prisma.user.create({ data: { email: 'vision@test.local' } });
   await prisma.goal.create({ data: { userId: user.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
@@ -527,7 +585,7 @@ async function main() {
 
   // ── provider failure -> FAILED, never a broken scan, manual fallback signaled ──
   const failRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'nonexistent' }), [new FixtureVisionProvider()]);
-  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader);
+  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry);
   const failedProposal = await failVisionSvc.createScan(user.id, 'anything.jpg', 'PHOTO');
   check('unknown provider -> scan FAILED, not thrown to the caller', failedProposal.status === 'FAILED' && failedProposal.fallback.reason === 'PROVIDER_ERROR');
   const failedScanRow = await prisma.visionScan.findUnique({ where: { id: failedProposal.scanId } });
@@ -541,7 +599,7 @@ async function main() {
     async recognize() { return { providerId: 'bad', detections: 'not-an-array' } as any; },
   };
   const badRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'bad' }), [badProvider]);
-  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader);
+  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry);
   const badProposal = await badSvc.createScan(user.id, 'chicken.jpg', 'PHOTO');
   check('malformed provider response -> scan FAILED (validation gate, fail-safe)', badProposal.status === 'FAILED');
   const badRow = await prisma.visionScan.findUnique({ where: { id: badProposal.scanId } });
@@ -621,11 +679,11 @@ async function main() {
   console.log('\n── V3.1: PROVIDER FAILURE / OFFLINE (network error, not "not found") ──');
   const throwingBarcodeProvider = { id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } };
   const throwingRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'throws' }), [throwingBarcodeProvider]);
-  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry, priorReader);
+  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry, priorReader, menuRegistry);
   const throwScan = await throwingSvc.createBarcodeScan(user.id, '2223334445556');
   check('a real lookup failure (offline/timeout) is distinct from not-found — scan FAILED, same degradation contract as vision', throwScan.status === 'FAILED' && throwScan.fallback.reason === 'PROVIDER_ERROR' && throwScan.mode === 'FALLBACK');
   const unknownBarcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'ghost-barcode' }), [barcodeFixture]);
-  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry, priorReader);
+  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry, priorReader, menuRegistry);
   const unknownScan = await unknownBarcodeSvc.createBarcodeScan(user.id, '3334445556667');
   check('a misconfigured provider id fails the scan gracefully, never throws to the caller', unknownScan.status === 'FAILED' && unknownScan.mode === 'FALLBACK');
 
@@ -675,7 +733,7 @@ async function main() {
   const unreadableScan = await visionSvc.createLabelScan(user.id, 'unreadable-label.jpg');
   check('an unreadable label degrades to manual (serving 0 cannot be logged)', unreadableScan.status === 'FAILED' && unreadableScan.mode === 'FALLBACK');
   const throwingOcrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'throws' }), [{ id: 'throws', async extract() { throw new Error('NETWORK_TIMEOUT'); } }]);
-  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry, priorReader);
+  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry, priorReader, menuRegistry);
   const ocrFailScan = await throwingOcrSvc.createLabelScan(user.id, 'us-label.jpg');
   check('an OCR provider failure degrades to manual, never throws to the caller', ocrFailScan.status === 'FAILED' && ocrFailScan.fallback.reason === 'PROVIDER_ERROR');
 
@@ -777,6 +835,52 @@ async function main() {
   check('unknown user -> no bias, no crash', (await priorReader.visionBiasRatios('00000000-0000-0000-0000-000000000000')).length === 0);
   check('no active plan -> null expectation, no crash', (await priorReader.plannerExpectedGrams(learner.id, pollo.id, nowMealType)) === null);
 
+  console.log('\n── V3.4: RESTAURANT SCAN (context + menu candidates + SAME write path) ──');
+  const restScan = await visionSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
+  check('a restaurant scan is an ordinary PROPOSED scan (no new lifecycle)', restScan.status === 'PROPOSED');
+  check('proposal carries restaurant context above the threshold', restScan.restaurant?.restaurantName === 'La Esquina Criolla' && restScan.restaurant?.confidence === 0.85 && restScan.restaurant?.category === 'latam casera');
+  check('menu candidates arrive from the configured source, sanitized', (restScan.restaurant?.menuCandidates.length ?? 0) === 4 && restScan.restaurant!.menuCandidates[0].calories === 620);
+  check('detections still matched through the SAME FoodService pipeline (pollo from catalog)', restScan.candidates[0].foodItemId === pollo.id);
+  check('portion engine untouched: portion + explanation exactly as V3.3 leaves them', ['PROVIDER_ESTIMATE', 'SERVING_DEFAULT', 'USER_PRIOR', 'BLENDED'].includes(restScan.candidates[0].portion.method) && Array.isArray(restScan.candidates[0].portionExplanation));
+  const restPersisted = await prisma.visionScan.findUnique({ where: { id: restScan.scanId } });
+  check('restaurant context persists INSIDE the proposal Json — zero migration', ((restPersisted?.proposal as any)?.restaurant?.restaurantName) === 'La Esquina Criolla');
+
+  const restConfirm = await visionSvc.confirmScan(user.id, {
+    scanId: restScan.scanId,
+    mealType: restScan.suggestedMealType,
+    items: [
+      { foodItemId: restScan.candidates[0].foodItemId, quantity: restScan.candidates[0].portion.grams, unit: 'g', grams: restScan.candidates[0].portion.grams, acceptedFromCandidate: 0 },
+      { foodItemId: null, customName: 'Sopa de la casa', quantity: 1, unit: 'serving', calories: 310, acceptedFromCandidate: null },
+    ],
+  } as any);
+  check('restaurant confirm returns today (unchanged confirmScan/LogsService contract)', !!restConfirm);
+  const restMeal = await prisma.loggedMeal.findFirst({ where: { visionScanId: restScan.scanId }, include: { items: true } });
+  check('LoggedMeal via the SAME write path with vision provenance (catalog item + menu one-off)', restMeal?.source === 'vision' && restMeal?.items.length === 2);
+  const soupItem = restMeal?.items.find((i: any) => i.nameSnapshot === 'Sopa de la casa');
+  check('menu dish logged as one-off with PUBLISHED calories; unpublished macros stay at the platform default, never invented', soupItem?.calories === 310 && Number(soupItem?.proteinG) === 0 && soupItem?.foodItemId === null);
+  check('scan LOGGED — confirm needed ZERO changes for a restaurant scan', (await prisma.visionScan.findUnique({ where: { id: restScan.scanId } }))?.status === 'LOGGED');
+
+  console.log('\n── V3.4: THRESHOLD + FALLBACK (never a worse experience than manual) ──');
+  const faintScan = await visionSvc.createScan(user.id, 'restaurant-faint-dinner.jpg', 'PHOTO');
+  check('a weak scene signal (0.3) -> NO restaurant context, ordinary photo scan', faintScan.status === 'PROPOSED' && faintScan.restaurant === undefined);
+  check('…and the candidates are still there (the cue was dropped, not the scan)', faintScan.candidates.length === 2);
+  const homeRegression = await visionSvc.createScan(user.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  check('regression: a home-cooked photo carries NO restaurant field at all', homeRegression.restaurant === undefined);
+  const rejectRest = await visionSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
+  await visionSvc.rejectScan(user.id, rejectRest.scanId);
+  check('rejecting a restaurant scan works unchanged', (await prisma.visionScan.findUnique({ where: { id: rejectRest.scanId } }))?.status === 'REJECTED');
+
+  console.log('\n── V3.4: MENU SOURCE DEGRADATION (fail-soft, provider swap, determinism) ──');
+  const throwingMenuRegistry = new RestaurantMenuProviderRegistry(new ConfigService({ RESTAURANT_MENU_PROVIDER: 'throws' }), [{ id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } }]);
+  const throwingMenuSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, throwingMenuRegistry);
+  const failMenuScan = await throwingMenuSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
+  check('a menu source outage costs the candidates, NEVER the scan (fail-soft)', failMenuScan.status === 'PROPOSED' && failMenuScan.restaurant?.restaurantName === 'La Esquina Criolla' && failMenuScan.restaurant?.menuCandidates.length === 0);
+  const noneMenuSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, new RestaurantMenuProviderRegistry(new ConfigService({}), [new NullRestaurantMenuProvider()]));
+  const noneScan = await noneMenuSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
+  check("the production default ('none') still surfaces context — only the menu candidates are absent", noneScan.restaurant?.restaurantName === 'La Esquina Criolla' && noneScan.restaurant?.menuCandidates.length === 0);
+  const restScanAgain = await visionSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
+  check('determinism: same image ref -> identical restaurant context', JSON.stringify(restScanAgain.restaurant) === JSON.stringify(restScan.restaurant));
+
   console.log('\n── NO-BYPASS INVARIANT ──');
   const visionMeals = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, source: 'vision' } });
   const nonVisionScanRows = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, visionScanId: null, source: 'vision' } });
@@ -797,7 +901,7 @@ async function main() {
   try { await pg.stop(); } catch { /* teardown */ }
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 
-  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1+V3.2+V3.3`);
+  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1+V3.2+V3.3+V3.4`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
