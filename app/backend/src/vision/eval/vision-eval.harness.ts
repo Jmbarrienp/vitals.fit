@@ -22,6 +22,19 @@ export interface EvalCase {
   requiresCapability?: keyof VisionProviderCapabilities;
 }
 
+export interface EvalOptions {
+  /**
+   * Probing determinism costs a SECOND `recognize()` per case — free against the
+   * fixture, a real API call (and real money) against a vendor. Default true keeps
+   * fixture/CI behavior unchanged; turn it off to evaluate a paid provider at 1x cost.
+   *
+   * Note that a non-deterministic result from a real model is a FINDING, not a
+   * failure: the platform's determinism guarantee lives in the pipeline stages
+   * after the provider, which is exactly why they were built pure.
+   */
+  probeDeterminism?: boolean;
+}
+
 export interface EvalCaseResult {
   name: string;
   capabilitySupported: boolean;
@@ -34,7 +47,8 @@ export interface EvalCaseResult {
   avgConfidence: number | null;
   contractValid: boolean | null;
   validationErrors: string[];
-  deterministic: boolean | null; // same imageRef twice -> identical detections
+  /** same imageRef twice -> identical detections. null = not probed (or the case never ran). */
+  deterministic: boolean | null;
 }
 
 export interface ProviderEvalReport {
@@ -46,7 +60,8 @@ export interface ProviderEvalReport {
     executed: number;
     successRate: number; // successes / executed (0..1)
     avgLatencyMs: number | null;
-    allDeterministic: boolean;
+    /** null when determinism wasn't probed — "not measured", never silently reported as pass or fail. */
+    allDeterministic: boolean | null;
     allContractValid: boolean;
     unsupported: number;
   };
@@ -60,10 +75,15 @@ export const DEFAULT_EVAL_CASES: EvalCase[] = [
   { name: 'barcode_probe', imageRef: 'eval-barcode.jpg', source: 'BARCODE', requiresCapability: 'barcode' },
 ];
 
-export async function evaluateProvider(provider: VisionProvider, cases: EvalCase[] = DEFAULT_EVAL_CASES): Promise<ProviderEvalReport> {
+export async function evaluateProvider(
+  provider: VisionProvider,
+  cases: EvalCase[] = DEFAULT_EVAL_CASES,
+  opts: EvalOptions = {},
+): Promise<ProviderEvalReport> {
+  const probeDeterminism = opts.probeDeterminism ?? true;
   const results: EvalCaseResult[] = [];
   for (const c of cases) {
-    results.push(await runCase(provider, c));
+    results.push(await runCase(provider, c, probeDeterminism));
   }
 
   const executed = results.filter((r) => r.executed);
@@ -79,14 +99,37 @@ export async function evaluateProvider(provider: VisionProvider, cases: EvalCase
       executed: executed.length,
       successRate: executed.length > 0 ? successes.length / executed.length : 0,
       avgLatencyMs: latencies.length > 0 ? round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null,
-      allDeterministic: executed.every((r) => r.deterministic === true),
+      allDeterministic: probeDeterminism ? executed.every((r) => r.deterministic === true) : null,
       allContractValid: executed.every((r) => r.contractValid === true),
       unsupported: results.filter((r) => !r.capabilitySupported).length,
     },
   };
 }
 
-async function runCase(provider: VisionProvider, c: EvalCase): Promise<EvalCaseResult> {
+/**
+ * Run the SAME cases across several providers (Phase 2D.2 V2) — the mechanism
+ * for choosing a production provider on evidence rather than vendor preference.
+ * Every provider goes through the identical port, identical cases and identical
+ * contract validation, so the columns are genuinely comparable.
+ *
+ * This is the arbiter for the axes a code review can't settle: recognition
+ * quality, real latency, contract-validity rate under load. Running it against a
+ * paid vendor needs that vendor's key configured; providers are evaluated
+ * sequentially so a rate-limited one can't distort another's latency.
+ */
+export async function compareProviders(
+  providers: VisionProvider[],
+  cases: EvalCase[] = DEFAULT_EVAL_CASES,
+  opts: EvalOptions = {},
+): Promise<ProviderEvalReport[]> {
+  const reports: ProviderEvalReport[] = [];
+  for (const provider of providers) {
+    reports.push(await evaluateProvider(provider, cases, opts));
+  }
+  return reports;
+}
+
+async function runCase(provider: VisionProvider, c: EvalCase, probeDeterminism: boolean): Promise<EvalCaseResult> {
   // Capability negotiation: never run a case a provider can't support — report it.
   if (c.requiresCapability && !provider.capabilities[c.requiresCapability]) {
     return {
@@ -109,13 +152,16 @@ async function runCase(provider: VisionProvider, c: EvalCase): Promise<EvalCaseR
     const start = Date.now();
     const first = await provider.recognize({ imageRef: c.imageRef, source: c.source });
     const latencyMs = Date.now() - start;
-    const second = await provider.recognize({ imageRef: c.imageRef, source: c.source });
+
+    // The second call exists only to measure determinism — skip it when the caller
+    // doesn't want to pay for it. Latency is always taken from the first call.
+    const second = probeDeterminism ? await provider.recognize({ imageRef: c.imageRef, source: c.source }) : null;
 
     const validation = validateRecognitionResult(first);
     const detections = validation.result?.detections ?? [];
     const avgConfidence =
       detections.length > 0 ? round(detections.reduce((s, d) => s + d.labelConfidence, 0) / detections.length) : null;
-    const deterministic = JSON.stringify(first.detections) === JSON.stringify(second.detections);
+    const deterministic = second ? JSON.stringify(first.detections) === JSON.stringify(second.detections) : null;
 
     return {
       name: c.name,

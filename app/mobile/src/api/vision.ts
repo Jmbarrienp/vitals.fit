@@ -1,10 +1,25 @@
 import { apiClient } from './client';
 import type { ScanConfirmationItem, ScanSource, VisionScanProposal } from '../types/vision';
 
-/** Nutrition Vision V1 endpoints. Vision proposes; LogsService (via confirm) commits truth. */
+/** What the camera captured. The photo goes to OUR backend, which owns the provider key — mobile never talks to a vendor. */
+export interface CapturedImage {
+  base64: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+}
+
+/** Nutrition Vision endpoints. Vision proposes; LogsService (via confirm) commits truth. */
 export const visionApi = {
-  createScan: (imageRef: string, source: ScanSource = 'PHOTO') =>
-    apiClient.post<VisionScanProposal>('/vision/scans', { imageRef, source }),
+  /**
+   * V2: sends the captured pixels for real recognition. `imageRef` remains a
+   * plain capture label for provenance — the backend issues the real ref. Omit
+   * `image` and the backend runs the reference-only (fixture) path.
+   */
+  createScan: (imageRef: string, source: ScanSource = 'PHOTO', image?: CapturedImage) =>
+    apiClient.post<VisionScanProposal>('/vision/scans', {
+      imageRef,
+      source,
+      ...(image ? { imageBase64: image.base64, imageMimeType: image.mimeType } : {}),
+    }),
 
   getScan: (id: string) => apiClient.get<VisionScanProposal>(`/vision/scans/${id}`),
 

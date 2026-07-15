@@ -36,7 +36,9 @@ export function useVisionCapture() {
     }
 
     setState('capturing');
-    const shot = await ImagePicker.launchCameraAsync({ quality: 0.6, allowsEditing: false });
+    // base64 so the photo can reach the backend, which is where recognition happens.
+    // quality 0.6 keeps the payload small; the backend caps it at 5 MB regardless.
+    const shot = await ImagePicker.launchCameraAsync({ quality: 0.6, allowsEditing: false, base64: true });
     if (shot.canceled || !shot.assets?.[0]) {
       setState('idle');
       return null;
@@ -44,10 +46,14 @@ export function useVisionCapture() {
 
     setState('proposing');
     try {
-      // V1: we submit an image reference (a stable identifier). Real image bytes go
-      // to a real provider in V2; the fixture provider is deterministic on the ref.
-      const imageRef = shot.assets[0].fileName ?? `capture-${Date.now()}.jpg`;
-      const res = await visionApi.createScan(imageRef, 'PHOTO');
+      const asset = shot.assets[0];
+      const imageRef = asset.fileName ?? `capture-${Date.now()}.jpg`;
+      // V2: submit the real pixels. The backend calls the provider and returns a
+      // platform proposal — the vendor key never reaches this device. If the
+      // camera gave us no base64, we still submit the reference: the backend
+      // degrades that to the manual flow rather than failing the capture.
+      const image = asset.base64 ? { base64: asset.base64, mimeType: 'image/jpeg' as const } : undefined;
+      const res = await visionApi.createScan(imageRef, 'PHOTO', image);
       setProposal(res.data);
       setState('proposed');
       return res.data;

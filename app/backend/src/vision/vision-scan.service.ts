@@ -1,9 +1,10 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { FoodService } from '../food/food.service';
 import { LogsService } from '../logs/logs.service';
 import { VisionProviderRegistry } from './providers/provider.registry';
+import { VISION_IMAGE_STORE, VisionImageStore } from './images/image-store.port';
 import { validateRecognitionResult } from './providers/response-validator';
 import { buildCandidates, inferMealType } from './pipeline/build-candidates';
 import { deriveUxMode } from './pipeline/confidence';
@@ -22,7 +23,14 @@ import {
 } from './types/vision-contract';
 
 const PROPOSAL_TTL_MS = 30 * 60 * 1000; // 30 min to confirm before lazy expiry
-const RECOGNIZE_TIMEOUT_MS = 10_000; // mirrors AnthropicService's discipline
+/**
+ * Outer backstop for a provider that ignores its own deadline. It must stay
+ * LOOSER than any adapter's internal timeout (Claude's is 25s), never tighter:
+ * a tighter outer guard would fire first on every slow call and replace the
+ * adapter's specific error with a generic one. V0's 10s was sized for the
+ * fixture; a real vision call with a full image needs the headroom.
+ */
+const RECOGNIZE_TIMEOUT_MS = 30_000;
 const SEARCH_LIMIT_PER_DETECTION = 5;
 
 /**
@@ -43,18 +51,37 @@ export class VisionScanService {
     private readonly logs: LogsService,
     private readonly providers: VisionProviderRegistry,
     private readonly events: EventEmitter2,
+    @Inject(VISION_IMAGE_STORE) private readonly images: VisionImageStore,
   ) {}
 
-  /** CREATED -> PROCESSING -> PROPOSED (or FAILED on a provider error/timeout). */
-  async createScan(userId: string, imageRef: string, source: ScanSource): Promise<VisionScanProposal> {
+  /**
+   * CREATED -> PROCESSING -> PROPOSED (or FAILED on a provider error/timeout).
+   *
+   * `image` (V2) carries the actual captured photo. When present it is handed to
+   * the image store, and the ref the store returns — never the bytes — is what
+   * the scan row persists. When absent, `imageRef` is used verbatim, which keeps
+   * the V0/V1 fixture path (keyword refs like `chicken-plate.jpg`) working
+   * untouched: that is what lets dev, CI and the smoke run with no vendor key.
+   */
+  async createScan(
+    userId: string,
+    imageRef: string,
+    source: ScanSource,
+    image?: { base64: string; mimeType: string },
+  ): Promise<VisionScanProposal> {
+    // Store the payload BEFORE the scan row exists: a rejected image (too large,
+    // wrong type) is a bad request, not a failed scan, and shouldn't leave a row.
+    const storedRef = image ? await this.images.put(image.base64, image.mimeType) : null;
+    const ref = storedRef ?? imageRef;
+
     const scan = await this.prisma.visionScan.create({
-      data: { userId, source, status: 'PROCESSING', imageRef, expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS) },
+      data: { userId, source, status: 'PROCESSING', imageRef: ref, expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS) },
     });
 
     try {
       const provider = this.providers.active();
       const rawResult = await withTimeout(
-        provider.recognize({ imageRef, source, hints: { userId } }),
+        provider.recognize({ imageRef: ref, source, hints: { userId } }),
         RECOGNIZE_TIMEOUT_MS,
       );
 
@@ -134,6 +161,11 @@ export class VisionScanService {
         fallback: { reason: 'PROVIDER_ERROR' },
         contractVersion: VISION_CONTRACT_VERSION,
       };
+    } finally {
+      // Recognition is the only consumer of the pixels — everything downstream
+      // reads derived data. Release them on both paths; the ref stays on the row
+      // as provenance. A durable store would keep the bytes here instead.
+      if (storedRef) await this.images.discard(storedRef);
     }
   }
 

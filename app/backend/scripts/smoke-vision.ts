@@ -1,15 +1,19 @@
 /**
- * Smoke test for Nutrition Vision V0 (Phase 2D.2). Runs entirely against a
- * throwaway EMBEDDED local Postgres via the deterministic FixtureVisionProvider.
- * NEVER reads .env, NEVER touches production, NEVER calls a real vendor.
+ * Smoke test for Nutrition Vision V0 + V1 + V2 (Phase 2D.2). Runs entirely
+ * against a throwaway EMBEDDED local Postgres via the deterministic
+ * FixtureVisionProvider. NEVER reads .env, NEVER touches production, NEVER calls
+ * a real vendor — the V2 Claude adapter is exercised only on paths that provably
+ * short-circuit before any network call (no key, unresolvable image) and through
+ * its pure prompt/parser surface.
  *
  *   npm run smoke:vision
  *
  * Verifies: the full scan lifecycle, that confirmation converges on the
  * platform's single existing write path (LogsService.logMeal — meal.logged
  * fires, downstream rollup goes stale), provenance stamping, feedback capture,
- * lazy expiry, every failure/degradation path, and determinism of the pure
- * pipeline stages.
+ * lazy expiry, every failure/degradation path, determinism of the pure pipeline
+ * stages, and (V2) that a real provider slots into the unchanged port while raw
+ * image bytes never reach the database.
  */
 import 'reflect-metadata';
 import * as fs from 'fs';
@@ -40,12 +44,15 @@ import { FoodService } from '../src/food/food.service';
 import { LocalFoodAdapter } from '../src/food/adapters/local.adapter';
 import { LogsService } from '../src/logs/logs.service';
 import { FixtureVisionProvider } from '../src/vision/providers/fixture.provider';
+import { ClaudeVisionProvider } from '../src/vision/providers/claude-vision.provider';
+import { parseDetections, DETECTION_SCHEMA, VISION_SYSTEM_PROMPT } from '../src/vision/providers/claude-vision.prompt';
+import { EphemeralImageStore } from '../src/vision/images/ephemeral-image-store';
 import { VisionProviderRegistry } from '../src/vision/providers/provider.registry';
 import { VisionProvider } from '../src/vision/providers/vision-provider.port';
 import { validateRecognitionResult } from '../src/vision/providers/response-validator';
 import { VisionScanService } from '../src/vision/vision-scan.service';
 import { VISION_EVENTS } from '../src/vision/vision.events';
-import { evaluateProvider, DEFAULT_EVAL_CASES } from '../src/vision/eval/vision-eval.harness';
+import { evaluateProvider, compareProviders, DEFAULT_EVAL_CASES } from '../src/vision/eval/vision-eval.harness';
 import { matchDetection } from '../src/vision/pipeline/matching';
 import { estimatePortion } from '../src/vision/pipeline/portion';
 import { scoreCandidate, bandFor, deriveUxMode } from '../src/vision/pipeline/confidence';
@@ -148,6 +155,70 @@ async function main() {
   const stub2Report = await evaluateProvider(stub2, DEFAULT_EVAL_CASES);
   check('a different provider runs through the SAME harness unchanged', stub2Report.providerId === 'stub2' && stub2Report.summary.allContractValid === true);
 
+  console.log('\n── V2: EVAL HARNESS EXTENSIONS (cost control + head-to-head) ──');
+  let recognizeCalls = 0;
+  const countingProvider: VisionProvider = {
+    id: 'counting',
+    capabilities: { multiFood: true, portionHints: false, barcode: false, ocr: false, video: false },
+    async recognize() {
+      recognizeCalls++;
+      return { providerId: 'counting', model: 'm', providerVersion: '1', detections: [], latencyMs: 1 };
+    },
+  };
+  const probedCases = DEFAULT_EVAL_CASES.filter((c) => !c.requiresCapability);
+  await evaluateProvider(countingProvider, probedCases, { probeDeterminism: true });
+  const probedCalls = recognizeCalls;
+  recognizeCalls = 0;
+  const cheapReport = await evaluateProvider(countingProvider, probedCases, { probeDeterminism: false });
+  check('determinism probe costs a 2nd call per case (paid providers can skip it)', probedCalls === probedCases.length * 2 && recognizeCalls === probedCases.length);
+  check('unprobed determinism reports null — "not measured", never a false pass/fail', cheapReport.summary.allDeterministic === null && cheapReport.cases[0].deterministic === null);
+  check('latency still measured when determinism is not probed', typeof cheapReport.summary.avgLatencyMs === 'number');
+  const comparison = await compareProviders([fixture, stub2], DEFAULT_EVAL_CASES);
+  check('compareProviders runs the SAME cases across providers (the evidence for choosing one)', comparison.length === 2 && comparison[0].providerId === 'fixture' && comparison[1].providerId === 'stub2');
+
+  console.log('\n── V2: IMAGE STORE (transport seam; bytes never hit the DB) ──');
+  const store = new EphemeralImageStore();
+  const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const storedRef = await store.put(PNG_1PX, 'image/png');
+  check('put() returns an opaque ref, not the bytes', storedRef.startsWith('vision-mem://') && !storedRef.includes(PNG_1PX));
+  const resolved = await store.resolve(storedRef);
+  check('resolve() returns the bytes for a known ref', resolved?.base64 === PNG_1PX && resolved?.mimeType === 'image/png');
+  check('resolve() returns null (never throws) for a foreign ref — fixture keyword refs stay valid', (await store.resolve('eval-chicken-plate.jpg')) === null);
+  await store.discard(storedRef);
+  check('discard() releases the bytes', (await store.resolve(storedRef)) === null && store.size() === 0);
+  let rejectedMime = false;
+  try { await store.put(PNG_1PX, 'image/tiff'); } catch { rejectedMime = true; }
+  check('unsupported mime type is rejected at the boundary', rejectedMime === true);
+  let rejectedSize = false;
+  try { await store.put('A'.repeat(9_000_000), 'image/jpeg'); } catch { rejectedSize = true; }
+  check('oversized payload is rejected at the boundary', rejectedSize === true);
+
+  console.log('\n── V2: CLAUDE ADAPTER (pure surface + fail-safe paths; no network) ──');
+  const claudeNoKey = new ClaudeVisionProvider(new ConfigService({}), store);
+  check('adapter reports hasKey=false with no API key (coach pattern)', claudeNoKey.hasKey === false);
+  check('adapter implements the port unchanged (id + capabilities)', claudeNoKey.id === 'claude' && claudeNoKey.capabilities.multiFood === true && claudeNoKey.capabilities.barcode === false);
+  let noKeyErr = '';
+  try { await claudeNoKey.recognize({ imageRef: 'x.jpg', source: 'PHOTO' }); } catch (e: any) { noKeyErr = String(e.message); }
+  check('no key -> raises before any network call (service degrades it to manual)', noKeyErr.includes('VISION_PROVIDER_UNAVAILABLE'));
+  // A fake key builds a client but never calls out: the unresolved-image guard runs first.
+  const claudeFakeKey = new ClaudeVisionProvider(new ConfigService({ ANTHROPIC_API_KEY: 'sk-ant-not-a-real-key' }), store);
+  let unresolvedErr = '';
+  try { await claudeFakeKey.recognize({ imageRef: 'no-such-ref.jpg', source: 'PHOTO' }); } catch (e: any) { unresolvedErr = String(e.message); }
+  check('unresolvable image -> raises BEFORE spending a provider call', unresolvedErr.includes('VISION_IMAGE_UNRESOLVED'));
+  check('adapter is registered alongside the fixture (swap = 1 line)', new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'claude' }), [fixture, claudeNoKey]).active().id === 'claude');
+
+  console.log('\n── V2: PROMPT/SCHEMA CONTAINMENT + PARSER (pure) ──');
+  check('schema forbids extra keys and requires every field (structured-output rules)', (DETECTION_SCHEMA as any).additionalProperties === false && (DETECTION_SCHEMA as any).properties.detections.items.required.includes('portionGrams'));
+  check('system prompt forbids nutrition math (separation of knowledge)', VISION_SYSTEM_PROMPT.includes('No calcules calorías'));
+  const parsed = parseDetections({ detections: [{ label: '  Pollo A La Plancha ', labelConfidence: 0.9, boundingBox: { x: 0.1, y: 0.1, w: 0.4, h: 0.4 }, portionGrams: 180, portionConfidence: 0.7, attributes: ['Homemade'] }] });
+  check('parser normalizes label + maps portion hint to the contract', parsed[0].label === 'pollo a la plancha' && parsed[0].portionHint?.grams === 180 && parsed[0].attributes?.[0] === 'homemade');
+  const zeroGrams = parseDetections({ detections: [{ label: 'sopa', labelConfidence: 0.8, portionGrams: 0, portionConfidence: 0 }] });
+  check('portionGrams 0 = "cannot estimate" -> no hint, chain falls to SERVING_DEFAULT (never an invented quantity)', zeroGrams[0].portionHint === undefined && estimatePortion(zeroGrams[0], 120).method === 'SERVING_DEFAULT');
+  const hostile = parseDetections({ detections: [{ label: '', labelConfidence: 0.9 }, { label: 'arroz', labelConfidence: 'nope', boundingBox: { x: 'x' } }, 'not-an-object', { label: 'pan', labelConfidence: 42 }] });
+  check('parser is total: drops junk, never throws, clamps out-of-range confidence', hostile.length === 2 && hostile[0].label === 'arroz' && hostile[0].labelConfidence === 0 && hostile[1].labelConfidence === 1);
+  check('parser output still passes the contract validation gate', validateRecognitionResult({ providerId: 'claude', model: 'm', providerVersion: '1', latencyMs: 1, detections: hostile }).valid === true);
+  check('parser tolerates a non-conforming payload shape', parseDetections({ nope: true }).length === 0 && parseDetections(null).length === 0);
+
   // ── PART B: full lifecycle integration (embedded DB + fixture provider) ──
   console.log('\n── INTEGRATION (embedded Postgres + fixture provider) ──');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-vision-'));
@@ -164,7 +235,8 @@ async function main() {
   const events = new EventEmitter2();
   const logsSvc = new LogsService(prisma, events);
   const registry = new VisionProviderRegistry(new ConfigService({}), [new FixtureVisionProvider()]);
-  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events);
+  const imageStore = new EphemeralImageStore();
+  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore);
 
   const user = await prisma.user.create({ data: { email: 'vision@test.local' } });
   await prisma.goal.create({ data: { userId: user.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
@@ -239,7 +311,7 @@ async function main() {
 
   // ── provider failure -> FAILED, never a broken scan, manual fallback signaled ──
   const failRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'nonexistent' }), [new FixtureVisionProvider()]);
-  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events);
+  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore);
   const failedProposal = await failVisionSvc.createScan(user.id, 'anything.jpg', 'PHOTO');
   check('unknown provider -> scan FAILED, not thrown to the caller', failedProposal.status === 'FAILED' && failedProposal.fallback.reason === 'PROVIDER_ERROR');
   const failedScanRow = await prisma.visionScan.findUnique({ where: { id: failedProposal.scanId } });
@@ -253,7 +325,7 @@ async function main() {
     async recognize() { return { providerId: 'bad', detections: 'not-an-array' } as any; },
   };
   const badRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'bad' }), [badProvider]);
-  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events);
+  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore);
   const badProposal = await badSvc.createScan(user.id, 'chicken.jpg', 'PHOTO');
   check('malformed provider response -> scan FAILED (validation gate, fail-safe)', badProposal.status === 'FAILED');
   const badRow = await prisma.visionScan.findUnique({ where: { id: badProposal.scanId } });
@@ -289,6 +361,21 @@ async function main() {
   try { await visionSvc.confirmScan(user.id, { scanId: fbScan.scanId, items: [{ foodItemId: pollo.id, quantity: 150, unit: 'g', acceptedFromCandidate: 0 }] }); } catch { fbConfirmBlocked = true; }
   check('a fallen-back scan cannot then be confirmed', fbConfirmBlocked === true);
 
+  console.log('\n── V2: REAL UPLOAD PATH (image in, ref persisted, bytes released) ──');
+  const uploadPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const uploaded = await visionSvc.createScan(user.id, 'lunch-capture.jpg', 'PHOTO', { base64: uploadPng, mimeType: 'image/png' });
+  check('an uploaded photo still produces a normal proposal', uploaded.status === 'PROPOSED' && uploaded.candidates.length > 0);
+  const uploadedRow = await prisma.visionScan.findUnique({ where: { id: uploaded.scanId } });
+  check('the scan row stores the image STORE REF, not the caller-supplied name', uploadedRow!.imageRef.startsWith('vision-mem://'));
+  check('raw image bytes never reach the database', !uploadedRow!.imageRef.includes(uploadPng) && !JSON.stringify(uploadedRow).includes(uploadPng));
+  check('bytes are released once recognition is done (no leak past the scan)', imageStore.size() === 0);
+  const refOnly = await visionSvc.createScan(user.id, 'chicken-plate.jpg', 'PHOTO');
+  check('reference-only path (V0/V1 fixture) still works untouched — dev/CI need no vendor key', refOnly.status === 'PROPOSED' && refOnly.candidates.length === 3);
+  let badUpload = false;
+  try { await visionSvc.createScan(user.id, 'x.jpg', 'PHOTO', { base64: uploadPng, mimeType: 'image/tiff' }); } catch { badUpload = true; }
+  const scansForUser = await prisma.visionScan.count({ where: { userId: user.id, imageRef: 'x.jpg' } });
+  check('a rejected image is a bad request, not a failed scan (no orphan row)', badUpload === true && scansForUser === 0);
+
   console.log('\n── NO-BYPASS INVARIANT ──');
   const visionMeals = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, source: 'vision' } });
   const nonVisionScanRows = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, visionScanId: null, source: 'vision' } });
@@ -309,7 +396,7 @@ async function main() {
   try { await pg.stop(); } catch { /* teardown */ }
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 
-  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0`);
+  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
