@@ -19,9 +19,18 @@ export type ScanStatus =
   | 'LOGGED'
   | 'REJECTED'
   | 'EXPIRED'
-  | 'FAILED';
+  | 'FAILED'
+  | 'FALLBACK_MANUAL'; // user chose to log manually instead of confirming the proposal (V1)
 
 export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'LOW';
+
+/**
+ * The confirmation UX the backend recommends for a proposal (V1). The confidence
+ * POLICY lives here, not in mobile: HIGH -> a confident confirm CTA; MEDIUM ->
+ * review with explicit uncertainty; FALLBACK -> steer to manual logging (low
+ * confidence, no detections, or a provider failure). Mobile only renders it.
+ */
+export type ScanUxMode = 'CONFIRM' | 'REVIEW' | 'FALLBACK';
 
 export type PortionMethod =
   | 'REFERENCE_OBJECT'
@@ -79,6 +88,7 @@ export interface VisionScanProposal {
   scanId: string;
   status: ScanStatus;
   source: ScanSource;
+  mode: ScanUxMode; // backend-decided confirmation UX (confidence policy owned server-side)
   candidates: FoodCandidate[];
   scanConfidence: { overall: number; band: ConfidenceBand };
   suggestedMealType: string;

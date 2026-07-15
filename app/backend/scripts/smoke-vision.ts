@@ -48,7 +48,7 @@ import { VISION_EVENTS } from '../src/vision/vision.events';
 import { evaluateProvider, DEFAULT_EVAL_CASES } from '../src/vision/eval/vision-eval.harness';
 import { matchDetection } from '../src/vision/pipeline/matching';
 import { estimatePortion } from '../src/vision/pipeline/portion';
-import { scoreCandidate, bandFor } from '../src/vision/pipeline/confidence';
+import { scoreCandidate, bandFor, deriveUxMode } from '../src/vision/pipeline/confidence';
 import { buildCandidates } from '../src/vision/pipeline/build-candidates';
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'prisma', 'migrations');
@@ -98,6 +98,9 @@ async function main() {
   const low = scoreCandidate(0.3, 0.2, 0.2);
   check('weak signals -> LOW band', low.band === 'LOW', `${low.overall}`);
   check('bandFor is a pure threshold function', bandFor(0.8) === 'HIGH' && bandFor(0.5) === 'MEDIUM' && bandFor(0.1) === 'LOW');
+  check('UX mode: HIGH -> CONFIRM', deriveUxMode('HIGH', null, 2) === 'CONFIRM');
+  check('UX mode: MEDIUM -> REVIEW', deriveUxMode('MEDIUM', null, 2) === 'REVIEW');
+  check('UX mode: LOW / no-detections / failure -> FALLBACK', deriveUxMode('LOW', null, 2) === 'FALLBACK' && deriveUxMode('HIGH', null, 0) === 'FALLBACK' && deriveUxMode('HIGH', 'PROVIDER_ERROR', 2) === 'FALLBACK');
 
   console.log('\n── BUILD-CANDIDATES (pure composition, determinism) ──');
   const detections = [{ label: 'pollo', labelConfidence: 0.9 }];
@@ -182,6 +185,7 @@ async function main() {
   check('scan proposes multiple candidates (multi-food)', proposal.status === 'PROPOSED' && proposal.candidates.length === 3, `${proposal.candidates.length}`);
   check('first candidate matched to the catalog Pollo', proposal.candidates[0].foodItemId === pollo.id, `${proposal.candidates[0].displayName}`);
   check('scan-level confidence present with a band', ['HIGH', 'MEDIUM', 'LOW'].includes(proposal.scanConfidence.band));
+  check('proposal carries a backend-decided UX mode (V1)', ['CONFIRM', 'REVIEW', 'FALLBACK'].includes(proposal.mode), proposal.mode);
   check('contractVersion is set', proposal.contractVersion === 1);
 
   const persisted = await prisma.visionScan.findUnique({ where: { id: proposal.scanId } });
@@ -270,6 +274,26 @@ async function main() {
   check('expired scan status is EXPIRED', expiredRow?.status === 'EXPIRED');
 
   // ── ownership: a user cannot touch another user's scan ──
+  console.log('\n── FALLBACK TO MANUAL (V1) ──');
+  const mealsBeforeFallback = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id } } });
+  let fallbackEvt = false;
+  events.on(VISION_EVENTS.FALLBACK, () => { fallbackEvt = true; });
+  const fbScan = await visionSvc.createScan(user.id, 'chicken-fallback.jpg', 'PHOTO');
+  await visionSvc.markFallbackManual(user.id, fbScan.scanId);
+  const fbRow = await prisma.visionScan.findUnique({ where: { id: fbScan.scanId } });
+  check('fallback -> scan FALLBACK_MANUAL', fbRow?.status === 'FALLBACK_MANUAL');
+  check('vision.scan.fallback event fired', fallbackEvt === true);
+  const mealsAfterFallback = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id } } });
+  check('fallback creates NO LoggedMeal (manual flow does that)', mealsAfterFallback === mealsBeforeFallback, `${mealsBeforeFallback}->${mealsAfterFallback}`);
+  let fbConfirmBlocked = false;
+  try { await visionSvc.confirmScan(user.id, { scanId: fbScan.scanId, items: [{ foodItemId: pollo.id, quantity: 150, unit: 'g', acceptedFromCandidate: 0 }] }); } catch { fbConfirmBlocked = true; }
+  check('a fallen-back scan cannot then be confirmed', fbConfirmBlocked === true);
+
+  console.log('\n── NO-BYPASS INVARIANT ──');
+  const visionMeals = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, source: 'vision' } });
+  const nonVisionScanRows = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, visionScanId: null, source: 'vision' } });
+  check('every vision-sourced meal has a scan link (no direct vision write bypassed LogsService)', nonVisionScanRows === 0 && visionMeals >= 1, `vision meals=${visionMeals}`);
+
   console.log('\n── OWNERSHIP ──');
   const otherUser = await prisma.user.create({ data: { email: 'vision-other@test.local' } });
   const ownedScan = await visionSvc.createScan(user.id, 'chicken-owned.jpg', 'PHOTO');

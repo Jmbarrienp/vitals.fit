@@ -13,6 +13,7 @@ export const VISION_EVENTS = {
   PROPOSED: 'vision.scan.proposed',
   CONFIRMED: 'vision.scan.confirmed',
   FAILED: 'vision.scan.failed',
+  FALLBACK: 'vision.scan.fallback',
 } as const;
 
 export class VisionScanProposedEvent {
@@ -39,5 +40,14 @@ export class VisionScanFailedEvent {
     readonly userId: string,
     readonly scanId: string,
     readonly reason: string,
+  ) {}
+}
+
+/** The user abandoned the proposal and logged manually instead (V1 telemetry). */
+export class VisionScanFallbackEvent {
+  constructor(
+    readonly userId: string,
+    readonly scanId: string,
+    readonly fromStatus: string,
   ) {}
 }

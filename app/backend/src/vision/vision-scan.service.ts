@@ -6,10 +6,12 @@ import { LogsService } from '../logs/logs.service';
 import { VisionProviderRegistry } from './providers/provider.registry';
 import { validateRecognitionResult } from './providers/response-validator';
 import { buildCandidates, inferMealType } from './pipeline/build-candidates';
+import { deriveUxMode } from './pipeline/confidence';
 import {
   VISION_EVENTS,
   VisionScanConfirmedEvent,
   VisionScanFailedEvent,
+  VisionScanFallbackEvent,
   VisionScanProposedEvent,
 } from './vision.events';
 import {
@@ -80,15 +82,17 @@ export class VisionScanService {
       );
 
       const { candidates, scanConfidence } = buildCandidates(result.detections, searchResultsByIndex, defaultServingByIndex);
+      const fallbackReason = candidates.length === 0 ? 'NO_DETECTIONS' : null;
 
       const proposal: VisionScanProposal = {
         scanId: scan.id,
-        status: candidates.length > 0 ? 'PROPOSED' : 'PROPOSED', // empty candidates is still a valid proposal (manual fallback)
+        status: 'PROPOSED', // even empty candidates is a valid proposal — mode steers to manual fallback
         source,
+        mode: deriveUxMode(scanConfidence.band, fallbackReason, candidates.length),
         candidates,
         scanConfidence,
         suggestedMealType: inferMealType(new Date()),
-        fallback: { reason: candidates.length === 0 ? 'NO_DETECTIONS' : null },
+        fallback: { reason: fallbackReason },
         contractVersion: VISION_CONTRACT_VERSION,
       };
 
@@ -123,6 +127,7 @@ export class VisionScanService {
         scanId: scan.id,
         status: 'FAILED',
         source,
+        mode: 'FALLBACK',
         candidates: [],
         scanConfidence: { overall: 0, band: 'LOW' },
         suggestedMealType: inferMealType(new Date()),
@@ -141,12 +146,31 @@ export class VisionScanService {
       scanId: scan.id,
       status: scan.status as VisionScanProposal['status'],
       source: scan.source as ScanSource,
+      mode: 'FALLBACK',
       candidates: [],
       scanConfidence: { overall: 0, band: 'LOW' },
       suggestedMealType: inferMealType(new Date()),
       fallback: { reason: scan.failureReason },
       contractVersion: VISION_CONTRACT_VERSION,
     };
+  }
+
+  /**
+   * The user abandoned the proposal and logged manually instead (V1). Marks the
+   * scan FALLBACK_MANUAL for telemetry — it creates NO LoggedMeal (the manual flow
+   * does that through the existing path). Friction can only go down: this is the
+   * degradation escape hatch, never a failure.
+   */
+  async markFallbackManual(userId: string, scanId: string): Promise<void> {
+    const scan = await this.getOwnedScan(userId, scanId);
+    if (scan.status === 'LOGGED' || scan.status === 'CONFIRMED') {
+      throw new BadRequestException(`Scan is ${scan.status}, cannot fall back (already committed).`);
+    }
+    await this.prisma.visionScan.update({
+      where: { id: scanId },
+      data: { status: 'FALLBACK_MANUAL', failureReason: scan.failureReason ?? 'USER_CHOSE_MANUAL' },
+    });
+    this.events.emit(VISION_EVENTS.FALLBACK, new VisionScanFallbackEvent(userId, scanId, scan.status));
   }
 
   /**

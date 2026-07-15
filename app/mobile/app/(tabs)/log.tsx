@@ -14,6 +14,7 @@ import {
 } from '../../src/hooks/useFood';
 import { macrosFromPortion, type FoodItem } from '../../src/api/food';
 import type { MealType } from '../../src/types';
+import { FEATURES } from '../../src/config/features';
 
 const MEAL_TYPES: { value: MealType; label: string; emoji: string }[] = [
   { value: 'BREAKFAST', label: 'Desayuno', emoji: '🌅' },
@@ -245,6 +246,17 @@ export default function LogScreen() {
           <Text className="text-text-muted text-sm mb-5">
             Busca un alimento o ingresa manualmente
           </Text>
+
+          {/* ── Nutrition Vision V1: camera capture (feature-flagged; off by default) ── */}
+          {FEATURES.visionCapture && (
+            <TouchableOpacity
+              className="bg-primary/10 border border-primary/30 rounded-2xl py-3.5 px-4 mb-5 flex-row items-center justify-center gap-2"
+              activeOpacity={0.8}
+              onPress={() => router.push('/scan' as never)} // typed routes regenerate on `expo start`
+            >
+              <Text className="text-primary font-semibold text-sm">📷 Escanear comida con la cámara</Text>
+            </TouchableOpacity>
+          )}
 
           {/* ── Success banner ── */}
           {saved && (

@@ -34,4 +34,10 @@ export class VisionController {
   reject(@Request() req: { user: { id: string } }, @Param('id') id: string) {
     return this.scans.rejectScan(req.user.id, id);
   }
+
+  /** The user chose to log manually instead (V1). Records the fallback; creates no meal. */
+  @Post(':id/fallback')
+  fallback(@Request() req: { user: { id: string } }, @Param('id') id: string) {
+    return this.scans.markFallbackManual(req.user.id, id);
+  }
 }

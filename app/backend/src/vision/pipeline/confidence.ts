@@ -1,4 +1,4 @@
-import { CandidateConfidence, ConfidenceBand, FoodCandidate } from '../types/vision-contract';
+import { CandidateConfidence, ConfidenceBand, FoodCandidate, ScanUxMode } from '../types/vision-contract';
 
 /**
  * Deterministic confidence scoring (Phase 2D.2 V0) — three independent signals
@@ -19,6 +19,18 @@ export function bandFor(overall: number): ConfidenceBand {
   if (overall >= HIGH_THRESHOLD) return 'HIGH';
   if (overall >= MEDIUM_THRESHOLD) return 'MEDIUM';
   return 'LOW';
+}
+
+/**
+ * The confirmation UX policy (V1), owned server-side so mobile stays presentational.
+ * A degraded scan (no detections / provider failure) or LOW confidence steers to
+ * manual logging; MEDIUM shows the proposal with uncertainty; HIGH is a confident
+ * confirm. Friction can only go down — FALLBACK never blocks, it prefills.
+ */
+export function deriveUxMode(band: ConfidenceBand, fallbackReason: string | null, candidateCount: number): ScanUxMode {
+  if (fallbackReason !== null || candidateCount === 0 || band === 'LOW') return 'FALLBACK';
+  if (band === 'MEDIUM') return 'REVIEW';
+  return 'CONFIRM';
 }
 
 /** Scan-level confidence: calorie-weighted mean of candidate overalls (falls back to a plain mean). */
