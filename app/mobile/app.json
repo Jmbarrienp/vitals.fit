@@ -38,6 +38,12 @@
           "color": "#ffffff",
           "sounds": []
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Vitals Fit usa la cámara para escanear códigos de barras de productos empacados."
+        }
       ]
     ],
     "scheme": "fitnessai",

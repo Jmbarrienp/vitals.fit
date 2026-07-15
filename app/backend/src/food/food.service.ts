@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { LocalFoodAdapter } from './adapters/local.adapter';
+import { BarcodeProductData } from './adapters/food-adapter.interface';
 import { CreateCustomFoodDto } from './dto/create-custom-food.dto';
 
 @Injectable()
@@ -16,6 +17,14 @@ export class FoodService {
 
   findById(id: string) {
     return this.adapter.findById(id);
+  }
+
+  findByBarcode(barcode: string, userId?: string) {
+    return this.adapter.findByBarcode(barcode, userId);
+  }
+
+  upsertFromBarcode(barcode: string, product: BarcodeProductData) {
+    return this.adapter.upsertFromBarcode(barcode, product);
   }
 
   getRecent(userId: string) {

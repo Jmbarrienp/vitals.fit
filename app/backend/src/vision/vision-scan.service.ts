@@ -7,7 +7,9 @@ import { VisionProviderRegistry } from './providers/provider.registry';
 import { VISION_IMAGE_STORE, VisionImageStore } from './images/image-store.port';
 import { validateRecognitionResult } from './providers/response-validator';
 import { buildCandidates, inferMealType } from './pipeline/build-candidates';
+import { buildBarcodeCandidate } from './pipeline/barcode-candidate';
 import { deriveUxMode } from './pipeline/confidence';
+import { BarcodeLookupProviderRegistry } from './barcode/barcode-lookup.registry';
 import {
   VISION_EVENTS,
   VisionScanConfirmedEvent,
@@ -32,6 +34,10 @@ const PROPOSAL_TTL_MS = 30 * 60 * 1000; // 30 min to confirm before lazy expiry
  */
 const RECOGNIZE_TIMEOUT_MS = 30_000;
 const SEARCH_LIMIT_PER_DETECTION = 5;
+/** Outer backstop for a barcode lookup, looser than any adapter's own timeout (OpenFoodFacts' is 8s). */
+const BARCODE_LOOKUP_TIMEOUT_MS = 15_000;
+/** VisionScan.imageRef has no meaning for a barcode scan (no image exists); barcodeValue carries the real payload. */
+const BARCODE_SCAN_IMAGE_REF_PLACEHOLDER = 'barcode-scan';
 
 /**
  * The Vision scan lifecycle (Phase 2D.2 V0): CREATED -> PROCESSING -> PROPOSED ->
@@ -52,6 +58,7 @@ export class VisionScanService {
     private readonly providers: VisionProviderRegistry,
     private readonly events: EventEmitter2,
     @Inject(VISION_IMAGE_STORE) private readonly images: VisionImageStore,
+    private readonly barcodeLookups: BarcodeLookupProviderRegistry,
   ) {}
 
   /**
@@ -166,6 +173,135 @@ export class VisionScanService {
       // reads derived data. Release them on both paths; the ref stays on the row
       // as provenance. A durable store would keep the bytes here instead.
       if (storedRef) await this.images.discard(storedRef);
+    }
+  }
+
+  /**
+   * CREATED -> PROCESSING -> PROPOSED, the barcode sibling of `createScan`
+   * (Phase 2D.2 V3.1). No `VisionProvider` involved: decoding already happened
+   * on-device, so this method starts from a decoded barcode string, not an
+   * image. Reuses the SAME `VisionScan` lifecycle, the SAME confirm/reject/
+   * fallback methods, and the SAME `meal.logged` convergence — a barcode scan
+   * is a different producer feeding the identical write path, never a parallel
+   * nutrition system.
+   *
+   * Resolution order (search order §food_matching, collapsed for exact
+   * identity): local exact-barcode match (global catalog + this user's own
+   * custom foods) -> external lookup provider -> upsert a new global catalog
+   * row on success. "Not found" is a valid, handled outcome — status stays
+   * PROPOSED with empty candidates, mirroring how `createScan` treats zero
+   * detections. A real lookup failure (timeout, network, malformed) falls
+   * through to the same FAILED path as an image-based scan.
+   */
+  async createBarcodeScan(userId: string, barcode: string): Promise<VisionScanProposal> {
+    const source: ScanSource = 'BARCODE';
+    const scan = await this.prisma.visionScan.create({
+      data: {
+        userId,
+        source,
+        status: 'PROCESSING',
+        imageRef: BARCODE_SCAN_IMAGE_REF_PLACEHOLDER,
+        barcodeValue: barcode,
+        expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS),
+      },
+    });
+
+    try {
+      let food = await this.food.findByBarcode(barcode, userId);
+      let providerId = 'local-cache'; // no external call was made — the exact product was already ours
+      let providerVersion = '1';
+      let servingHintGrams: number | null = null;
+
+      if (!food) {
+        const provider = this.barcodeLookups.active();
+        const lookup = await withTimeout(provider.lookup(barcode), BARCODE_LOOKUP_TIMEOUT_MS);
+        providerId = lookup.providerId;
+        providerVersion = lookup.providerVersion;
+
+        if (!lookup.found || !lookup.product) {
+          const proposal: VisionScanProposal = {
+            scanId: scan.id,
+            status: 'PROPOSED', // a decodable-but-unregistered barcode is a valid, handled outcome — not a failure
+            source,
+            mode: deriveUxMode('LOW', 'BARCODE_NOT_FOUND', 0),
+            candidates: [],
+            scanConfidence: { overall: 0, band: 'LOW' },
+            suggestedMealType: inferMealType(new Date()),
+            fallback: { reason: 'BARCODE_NOT_FOUND' },
+            contractVersion: VISION_CONTRACT_VERSION,
+          };
+          await this.prisma.visionScan.update({
+            where: { id: scan.id },
+            data: { status: 'PROPOSED', providerId, providerVersion, proposal: proposal as any, scanConfidence: 0, processedAt: new Date() },
+          });
+          this.events.emit(
+            VISION_EVENTS.PROPOSED,
+            new VisionScanProposedEvent(userId, scan.id, source, 0, proposal.scanConfidence),
+          );
+          return proposal;
+        }
+
+        servingHintGrams = lookup.product.servingGrams;
+        food = await this.food.upsertFromBarcode(barcode, lookup.product);
+      }
+
+      const defaultServing = await this.prisma.servingSize.findFirst({
+        where: { foodItemId: food.id, isDefault: true },
+        select: { grams: true },
+      });
+      const { candidate, scanConfidence } = buildBarcodeCandidate(
+        food,
+        servingHintGrams !== null ? { servingGrams: servingHintGrams } : null,
+        defaultServing?.grams ?? null,
+      );
+
+      const proposal: VisionScanProposal = {
+        scanId: scan.id,
+        status: 'PROPOSED',
+        source,
+        mode: deriveUxMode(scanConfidence.band, null, 1),
+        candidates: [candidate],
+        scanConfidence,
+        suggestedMealType: inferMealType(new Date()),
+        fallback: { reason: null },
+        contractVersion: VISION_CONTRACT_VERSION,
+      };
+
+      await this.prisma.visionScan.update({
+        where: { id: scan.id },
+        data: {
+          status: 'PROPOSED',
+          providerId,
+          providerVersion,
+          proposal: proposal as any,
+          scanConfidence: scanConfidence.overall,
+          processedAt: new Date(),
+        },
+      });
+
+      this.events.emit(VISION_EVENTS.PROPOSED, new VisionScanProposedEvent(userId, scan.id, source, 1, scanConfidence));
+      return proposal;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'UNKNOWN_ERROR';
+      await this.prisma.visionScan.update({
+        where: { id: scan.id },
+        data: { status: 'FAILED', failureReason: reason, processedAt: new Date() },
+      });
+      this.events.emit(VISION_EVENTS.FAILED, new VisionScanFailedEvent(userId, scan.id, reason));
+      // Same degradation contract as createScan: a lookup failure (timeout,
+      // network, malformed response) never traps the user — it hands back a
+      // FALLBACK proposal so mobile opens manual search, barcode prefilled.
+      return {
+        scanId: scan.id,
+        status: 'FAILED',
+        source,
+        mode: 'FALLBACK',
+        candidates: [],
+        scanConfidence: { overall: 0, band: 'LOW' },
+        suggestedMealType: inferMealType(new Date()),
+        fallback: { reason: 'PROVIDER_ERROR' },
+        contractVersion: VISION_CONTRACT_VERSION,
+      };
     }
   }
 

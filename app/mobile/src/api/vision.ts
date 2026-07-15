@@ -21,6 +21,10 @@ export const visionApi = {
       ...(image ? { imageBase64: image.base64, imageMimeType: image.mimeType } : {}),
     }),
 
+  /** V3.1: decoding already happened on-device — this sends the digits, never an image. Separate endpoint, same downstream proposal/confirm/reject/fallback contract. */
+  createBarcodeScan: (barcode: string) =>
+    apiClient.post<VisionScanProposal>('/vision/scans/barcode', { barcode }),
+
   getScan: (id: string) => apiClient.get<VisionScanProposal>(`/vision/scans/${id}`),
 
   confirm: (id: string, items: ScanConfirmationItem[], mealType?: string) =>

@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, Post, Request, UseGu
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { VisionScanService } from './vision-scan.service';
 import { CreateScanDto } from './dto/create-scan.dto';
+import { CreateBarcodeScanDto } from './dto/create-barcode-scan.dto';
 import { ConfirmScanDto } from './dto/confirm-scan.dto';
 
 /**
@@ -30,6 +31,18 @@ export class VisionController {
     }
     const image = dto.imageBase64 ? { base64: dto.imageBase64, mimeType: dto.imageMimeType! } : undefined;
     return this.scans.createScan(req.user.id, dto.imageRef ?? '', dto.source, image);
+  }
+
+  /**
+   * Barcode is decoded ON-DEVICE (V3.1) — this endpoint receives the digits,
+   * never an image. A separate route from POST / because the input shape is
+   * genuinely different (a string, not a photo), not a variant of it; confirm/
+   * reject/fallback/get below are shared unchanged since the VisionScan
+   * lifecycle they operate on is source-agnostic.
+   */
+  @Post('barcode')
+  createBarcode(@Request() req: { user: { id: string } }, @Body() dto: CreateBarcodeScanDto) {
+    return this.scans.createBarcodeScan(req.user.id, dto.barcode);
   }
 
   @Get(':id')

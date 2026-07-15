@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { FoodAdapter, NormalizedFood } from './food-adapter.interface';
+import { BarcodeProductData, FoodAdapter, NormalizedFood } from './food-adapter.interface';
 
 // A food must be logged at least this many times to count as "frequent"
 // (otherwise a single log would duplicate it into both Recents and Frequents).
@@ -126,6 +126,51 @@ export class LocalFoodAdapter implements FoodAdapter {
   async findById(id: string): Promise<NormalizedFood | null> {
     const item = await this.prisma.foodItem.findUnique({ where: { id } });
     return item ? this.normalize(item) : null;
+  }
+
+  /** Exact barcode identity, scoped to the global catalog + this user's own custom foods (never another user's private foods). */
+  async findByBarcode(barcode: string, userId?: string): Promise<NormalizedFood | null> {
+    const item = await this.prisma.foodItem.findFirst({
+      where: { barcode, ...this.eligibilityWhere(userId) },
+    });
+    if (!item) return null;
+    const favIds = userId ? await this.favoriteIdSet(userId) : new Set<string>();
+    return this.normalize(item, favIds.has(item.id));
+  }
+
+  /**
+   * Creates a GLOBAL catalog row (createdByUserId: null) for a barcode-resolved
+   * product — public, factual, commercially available data, not a private user
+   * food, so future scans by ANY user hit it. Re-checks by barcode first: two
+   * scans of a never-before-seen barcode in quick succession should resolve to
+   * ONE row, not two. This narrows but does not eliminate a race under truly
+   * concurrent requests — acceptable at this project's traffic scale, and no
+   * DB-level unique constraint was added on the pre-existing `barcode` column
+   * to avoid risking a migration failure against any already-seeded data.
+   */
+  async upsertFromBarcode(barcode: string, product: BarcodeProductData): Promise<NormalizedFood> {
+    const existing = await this.prisma.foodItem.findFirst({ where: { barcode, createdByUserId: null } });
+    if (existing) return this.normalize(existing);
+
+    const displayName = product.brand ? `${product.name} (${product.brand})` : product.name;
+    const item = await this.prisma.foodItem.create({
+      data: {
+        name: displayName,
+        nameLower: displayName.toLowerCase(),
+        nameNormalized: normalizeFood(displayName),
+        nameAliases: [],
+        caloriesPer100g: product.caloriesPer100g,
+        proteinPer100g: product.proteinPer100g,
+        carbsPer100g: product.carbsPer100g,
+        fatPer100g: product.fatPer100g,
+        fiberPer100g: product.fiberPer100g,
+        source: 'open_food_facts',
+        barcode,
+        isVerified: false,
+        isCommon: false,
+      },
+    });
+    return this.normalize(item);
   }
 
   /** Distinct foods this user logged most recently (newest first). */

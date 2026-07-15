@@ -9,6 +9,9 @@ import { FixtureVisionProvider } from './providers/fixture.provider';
 import { ClaudeVisionProvider } from './providers/claude-vision.provider';
 import { EphemeralImageStore } from './images/ephemeral-image-store';
 import { VISION_IMAGE_STORE } from './images/image-store.port';
+import { BarcodeLookupProviderRegistry } from './barcode/barcode-lookup.registry';
+import { FixtureBarcodeLookupProvider } from './barcode/fixture-barcode-lookup.provider';
+import { OpenFoodFactsLookupProvider } from './barcode/openfoodfacts-lookup.provider';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -41,6 +44,19 @@ import { VISION_IMAGE_STORE } from './images/image-store.port';
       useFactory: (config: ConfigService, fixture: FixtureVisionProvider, claude: ClaudeVisionProvider) =>
         new VisionProviderRegistry(config, [fixture, claude]),
       inject: [ConfigService, FixtureVisionProvider, ClaudeVisionProvider],
+    },
+
+    // Barcode lookup backends (V3.1) — a sibling registry, not an extension of
+    // the vision one: decoding is on-device, so this port takes a barcode
+    // string, never an image. Default is 'openfoodfacts', not 'fixture' — a
+    // real lookup is free and keyless, unlike a vision model call.
+    FixtureBarcodeLookupProvider,
+    OpenFoodFactsLookupProvider,
+    {
+      provide: BarcodeLookupProviderRegistry,
+      useFactory: (config: ConfigService, fixture: FixtureBarcodeLookupProvider, off: OpenFoodFactsLookupProvider) =>
+        new BarcodeLookupProviderRegistry(config, [fixture, off]),
+      inject: [ConfigService, FixtureBarcodeLookupProvider, OpenFoodFactsLookupProvider],
     },
   ],
   controllers: [VisionController],

@@ -524,7 +524,9 @@ model VisionScan {
   userId   String
   source   String // 'PHOTO' | 'BARCODE' | 'MENU_OCR' | 'RECEIPT_OCR' | 'VIDEO_FRAME' (growable)
   status   String // 'CREATED'|'PROCESSING'|'PROPOSED'|'CONFIRMED'|'LOGGED'|'REJECTED'|'EXPIRED'|'FAILED'
-  imageRef String // storage reference (e.g. Supabase Storage path), never raw bytes in the DB
+  imageRef String // storage reference (e.g. Supabase Storage path), never raw bytes in the DB; a fixed constant for BARCODE scans, which have no image
+
+  barcodeValue String? // the decoded barcode digits (V3.1) — what imageRef is to a photo scan
 
   providerId      String? // which VisionProvider handled this scan (e.g. 'fixture', 'claude')
   providerModel   String?

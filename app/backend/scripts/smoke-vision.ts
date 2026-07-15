@@ -1,10 +1,10 @@
 /**
- * Smoke test for Nutrition Vision V0 + V1 + V2 (Phase 2D.2). Runs entirely
- * against a throwaway EMBEDDED local Postgres via the deterministic
- * FixtureVisionProvider. NEVER reads .env, NEVER touches production, NEVER calls
- * a real vendor — the V2 Claude adapter is exercised only on paths that provably
- * short-circuit before any network call (no key, unresolvable image) and through
- * its pure prompt/parser surface.
+ * Smoke test for Nutrition Vision V0 + V1 + V2 + V3.1 (Phase 2D.2). Runs
+ * entirely against a throwaway EMBEDDED local Postgres via the deterministic
+ * FixtureVisionProvider / FixtureBarcodeLookupProvider. NEVER reads .env,
+ * NEVER touches production, NEVER calls a real vendor — the V2 Claude adapter
+ * and the V3.1 OpenFoodFacts adapter are exercised only on paths that provably
+ * short-circuit before any network call, and through their pure surfaces.
  *
  *   npm run smoke:vision
  *
@@ -12,8 +12,11 @@
  * platform's single existing write path (LogsService.logMeal — meal.logged
  * fires, downstream rollup goes stale), provenance stamping, feedback capture,
  * lazy expiry, every failure/degradation path, determinism of the pure pipeline
- * stages, and (V2) that a real provider slots into the unchanged port while raw
- * image bytes never reach the database.
+ * stages, (V2) that a real vision provider slots into the unchanged port while
+ * raw image bytes never reach the database, and (V3.1) that barcode is another
+ * producer into the SAME VisionScan lifecycle — local-cache resolution,
+ * external lookup + catalog upsert, not-found degradation, and duplicate scans
+ * resolving to one FoodItem, not two.
  */
 import 'reflect-metadata';
 import * as fs from 'fs';
@@ -33,6 +36,7 @@ const LOCAL_URL = `postgresql://postgres:postgres@localhost:${PORT}/${DB}`;
 process.env.DATABASE_URL = LOCAL_URL;
 process.env.DIRECT_URL = LOCAL_URL;
 delete process.env.VISION_PROVIDER; // force default -> fixture
+delete process.env.BARCODE_LOOKUP_PROVIDER; // force default -> openfoodfacts (still overridden explicitly per-test below)
 
 const EmbeddedPostgres = require('embedded-postgres').default || require('embedded-postgres');
 const { Client } = require('pg');
@@ -57,6 +61,10 @@ import { matchDetection } from '../src/vision/pipeline/matching';
 import { estimatePortion } from '../src/vision/pipeline/portion';
 import { scoreCandidate, bandFor, deriveUxMode } from '../src/vision/pipeline/confidence';
 import { buildCandidates } from '../src/vision/pipeline/build-candidates';
+import { buildBarcodeCandidate } from '../src/vision/pipeline/barcode-candidate';
+import { BarcodeLookupProviderRegistry } from '../src/vision/barcode/barcode-lookup.registry';
+import { FixtureBarcodeLookupProvider } from '../src/vision/barcode/fixture-barcode-lookup.provider';
+import { OpenFoodFactsLookupProvider } from '../src/vision/barcode/openfoodfacts-lookup.provider';
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'prisma', 'migrations');
 
@@ -219,6 +227,34 @@ async function main() {
   check('parser output still passes the contract validation gate', validateRecognitionResult({ providerId: 'claude', model: 'm', providerVersion: '1', latencyMs: 1, detections: hostile }).valid === true);
   check('parser tolerates a non-conforming payload shape', parseDetections({ nope: true }).length === 0 && parseDetections(null).length === 0);
 
+  console.log('\n── V3.1: BARCODE LOOKUP REGISTRY + FIXTURE (pure, no DB) ──');
+  const barcodeFixture = new FixtureBarcodeLookupProvider();
+  const knownProduct = await barcodeFixture.lookup('7501055310209');
+  check('fixture resolves a known barcode deterministically', knownProduct.found === true && knownProduct.product?.name === 'Galletas María');
+  const knownProduct2 = await barcodeFixture.lookup('7501055310209');
+  check('same barcode -> identical result (determinism)', JSON.stringify(knownProduct) === JSON.stringify(knownProduct2));
+  const notFoundLookup = await barcodeFixture.lookup('0000000000000');
+  check('fixture reports not-found as found:false, not an error', notFoundLookup.found === false && notFoundLookup.product === null);
+  const genericLookup = await barcodeFixture.lookup('9999999999999');
+  check('an unrecognized-but-plausible barcode resolves to a generic product (demoable happy path)', genericLookup.found === true && genericLookup.product !== null);
+  const bcSwap = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'openfoodfacts' }), [barcodeFixture, new OpenFoodFactsLookupProvider()]);
+  check('config selects the active barcode provider (swap to openfoodfacts)', bcSwap.active().id === 'openfoodfacts');
+  const bcDefault = new BarcodeLookupProviderRegistry(new ConfigService({}), [barcodeFixture, new OpenFoodFactsLookupProvider()]);
+  check('default barcode provider is openfoodfacts (free + keyless, unlike vision)', bcDefault.active().id === 'openfoodfacts');
+  let bcSwapThrew = false;
+  try { new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'ghost' }), [barcodeFixture]).active(); } catch { bcSwapThrew = true; }
+  check('unknown barcode provider throws (fails loud, not silent)', bcSwapThrew === true);
+
+  console.log('\n── V3.1: BARCODE CANDIDATE PIPELINE (pure — exact identity, not fuzzy) ──');
+  const cachedFood = { id: 'f-cached', name: 'Galletas María (Gamesa)', caloriesPer100g: 440, proteinPer100g: 7.5, carbsPer100g: 75, fatPer100g: 12, fiberPer100g: 2.5, source: 'open_food_facts', isCommon: false, isFavorite: false };
+  const { candidate: bcCandidate, scanConfidence: bcConfidence } = buildBarcodeCandidate(cachedFood, { servingGrams: 30 }, null);
+  check('a resolved barcode always carries a real foodItemId (never a null/orphan candidate)', bcCandidate.foodItemId === 'f-cached');
+  check('barcode identity is exact -> matchScore 1, not a fuzzy rank', bcCandidate.matchScore === 1);
+  check('serving hint from the product feeds portion estimation (PROVIDER_ESTIMATE)', bcCandidate.portion.method === 'PROVIDER_ESTIMATE' && bcCandidate.portion.grams === 30);
+  check('confidence band reflects portion uncertainty, not recognition doubt (recognition+match are both certain)', bcConfidence.band === 'HIGH' || bcConfidence.band === 'MEDIUM');
+  const { candidate: bcNoHint } = buildBarcodeCandidate(cachedFood, null, 45);
+  check('no product hint -> falls back to the FoodItem default serving (chain reused unchanged)', bcNoHint.portion.method === 'SERVING_DEFAULT' && bcNoHint.portion.grams === 45);
+
   // ── PART B: full lifecycle integration (embedded DB + fixture provider) ──
   console.log('\n── INTEGRATION (embedded Postgres + fixture provider) ──');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-vision-'));
@@ -236,7 +272,8 @@ async function main() {
   const logsSvc = new LogsService(prisma, events);
   const registry = new VisionProviderRegistry(new ConfigService({}), [new FixtureVisionProvider()]);
   const imageStore = new EphemeralImageStore();
-  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore);
+  const barcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'fixture' }), [new FixtureBarcodeLookupProvider(), new OpenFoodFactsLookupProvider()]);
+  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry);
 
   const user = await prisma.user.create({ data: { email: 'vision@test.local' } });
   await prisma.goal.create({ data: { userId: user.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
@@ -311,7 +348,7 @@ async function main() {
 
   // ── provider failure -> FAILED, never a broken scan, manual fallback signaled ──
   const failRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'nonexistent' }), [new FixtureVisionProvider()]);
-  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore);
+  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry);
   const failedProposal = await failVisionSvc.createScan(user.id, 'anything.jpg', 'PHOTO');
   check('unknown provider -> scan FAILED, not thrown to the caller', failedProposal.status === 'FAILED' && failedProposal.fallback.reason === 'PROVIDER_ERROR');
   const failedScanRow = await prisma.visionScan.findUnique({ where: { id: failedProposal.scanId } });
@@ -325,7 +362,7 @@ async function main() {
     async recognize() { return { providerId: 'bad', detections: 'not-an-array' } as any; },
   };
   const badRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'bad' }), [badProvider]);
-  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore);
+  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry);
   const badProposal = await badSvc.createScan(user.id, 'chicken.jpg', 'PHOTO');
   check('malformed provider response -> scan FAILED (validation gate, fail-safe)', badProposal.status === 'FAILED');
   const badRow = await prisma.visionScan.findUnique({ where: { id: badProposal.scanId } });
@@ -376,6 +413,60 @@ async function main() {
   const scansForUser = await prisma.visionScan.count({ where: { userId: user.id, imageRef: 'x.jpg' } });
   check('a rejected image is a bad request, not a failed scan (no orphan row)', badUpload === true && scansForUser === 0);
 
+  console.log('\n── V3.1: BARCODE SCAN LIFECYCLE (fixture lookup provider, real DB) ──');
+  const KNOWN_BARCODE = '7501055310209';
+  const firstScan = await visionSvc.createBarcodeScan(user.id, KNOWN_BARCODE);
+  check('first scan of a new barcode resolves via external lookup', firstScan.status === 'PROPOSED' && firstScan.candidates.length === 1);
+  check('resolved product feeds a real catalog candidate (never orphaned)', !!firstScan.candidates[0]?.foodItemId);
+  check('confident barcode resolution -> CONFIRM or REVIEW, not buried in FALLBACK', firstScan.mode === 'CONFIRM' || firstScan.mode === 'REVIEW');
+  const createdFoodId = firstScan.candidates[0].foodItemId as string;
+  const createdFood = await prisma.foodItem.findUnique({ where: { id: createdFoodId } });
+  check('a NEW global FoodItem was created from the lookup (source=open_food_facts, barcode stamped)', createdFood?.source === 'open_food_facts' && createdFood?.barcode === KNOWN_BARCODE && createdFood?.createdByUserId === null);
+  const firstScanRow = await prisma.visionScan.findUnique({ where: { id: firstScan.scanId } });
+  check('scan row stores the decoded barcode + a placeholder imageRef (no image exists for this modality)', firstScanRow?.barcodeValue === KNOWN_BARCODE && firstScanRow?.imageRef === 'barcode-scan');
+  check('provenance stamps the real provider (openfoodfacts fixture stands in), not "local-cache" on a first-time lookup', firstScanRow?.providerId === 'fixture');
+
+  console.log('\n── V3.1: DUPLICATE SCANS (same barcode twice -> one FoodItem, not two) ──');
+  const beforeCount = await prisma.foodItem.count({ where: { barcode: KNOWN_BARCODE } });
+  const secondScan = await visionSvc.createBarcodeScan(user.id, KNOWN_BARCODE);
+  const afterCount = await prisma.foodItem.count({ where: { barcode: KNOWN_BARCODE } });
+  check('scanning the same barcode again resolves to the SAME FoodItem (no duplicate row)', beforeCount === 1 && afterCount === 1 && secondScan.candidates[0]?.foodItemId === createdFoodId);
+  const secondScanRow = await prisma.visionScan.findUnique({ where: { id: secondScan.scanId } });
+  check('the repeat scan skipped the external lookup entirely (provenance = local-cache)', secondScanRow?.providerId === 'local-cache');
+
+  console.log('\n── V3.1: NOT-FOUND DEGRADATION (decoded fine, product unregistered) ──');
+  const notFoundScan = await visionSvc.createBarcodeScan(user.id, '0000000000000');
+  check('an unregistered barcode is a valid, handled outcome — status stays PROPOSED, not FAILED', notFoundScan.status === 'PROPOSED' && notFoundScan.candidates.length === 0);
+  check('fallback reason is specific and mode steers to manual search (barcode prefillable client-side)', notFoundScan.fallback.reason === 'BARCODE_NOT_FOUND' && notFoundScan.mode === 'FALLBACK');
+
+  console.log('\n── V3.1: PROVIDER FAILURE / OFFLINE (network error, not "not found") ──');
+  const throwingBarcodeProvider = { id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } };
+  const throwingRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'throws' }), [throwingBarcodeProvider]);
+  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry);
+  const throwScan = await throwingSvc.createBarcodeScan(user.id, '2223334445556');
+  check('a real lookup failure (offline/timeout) is distinct from not-found — scan FAILED, same degradation contract as vision', throwScan.status === 'FAILED' && throwScan.fallback.reason === 'PROVIDER_ERROR' && throwScan.mode === 'FALLBACK');
+  const unknownBarcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'ghost-barcode' }), [barcodeFixture]);
+  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry);
+  const unknownScan = await unknownBarcodeSvc.createBarcodeScan(user.id, '3334445556667');
+  check('a misconfigured provider id fails the scan gracefully, never throws to the caller', unknownScan.status === 'FAILED' && unknownScan.mode === 'FALLBACK');
+
+  console.log('\n── V3.1: CONFIRM CONVERGES ON THE SAME WRITE PATH (LogsService.logMeal, unchanged) ──');
+  const barcodeConfirmResult = await visionSvc.confirmScan(user.id, {
+    scanId: firstScan.scanId,
+    mealType: firstScan.suggestedMealType,
+    items: [{
+      foodItemId: firstScan.candidates[0].foodItemId,
+      quantity: firstScan.candidates[0].portion.grams,
+      unit: 'g',
+      grams: firstScan.candidates[0].portion.grams,
+      acceptedFromCandidate: 0,
+    }],
+  } as any);
+  check('barcode confirm returns today (unchanged confirmScan/LogsService contract)', !!barcodeConfirmResult);
+  const barcodeLoggedMeal = await prisma.loggedMeal.findFirst({ where: { visionScanId: firstScan.scanId } });
+  check('LoggedMeal was created through the SAME write path, with barcode provenance', barcodeLoggedMeal?.source === 'vision' && barcodeLoggedMeal?.visionScanId === firstScan.scanId);
+  check('confirmScan/rejectScan/getScan needed ZERO changes for barcode — the scan lifecycle is source-agnostic', (await prisma.visionScan.findUnique({ where: { id: firstScan.scanId } }))?.status === 'LOGGED');
+
   console.log('\n── NO-BYPASS INVARIANT ──');
   const visionMeals = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, source: 'vision' } });
   const nonVisionScanRows = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, visionScanId: null, source: 'vision' } });
@@ -396,7 +487,7 @@ async function main() {
   try { await pg.stop(); } catch { /* teardown */ }
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 
-  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2`);
+  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
