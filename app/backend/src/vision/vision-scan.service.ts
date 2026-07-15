@@ -8,8 +8,12 @@ import { VISION_IMAGE_STORE, VisionImageStore } from './images/image-store.port'
 import { validateRecognitionResult } from './providers/response-validator';
 import { buildCandidates, inferMealType } from './pipeline/build-candidates';
 import { buildBarcodeCandidate } from './pipeline/barcode-candidate';
+import { buildLabelCandidate } from './pipeline/label-candidate';
+import { parseLabel } from './pipeline/label-parser';
+import { validateNutritionLabel } from './pipeline/label-validator';
 import { deriveUxMode } from './pipeline/confidence';
 import { BarcodeLookupProviderRegistry } from './barcode/barcode-lookup.registry';
+import { OCRProviderRegistry } from './ocr/ocr-provider.registry';
 import {
   VISION_EVENTS,
   VisionScanConfirmedEvent,
@@ -38,6 +42,10 @@ const SEARCH_LIMIT_PER_DETECTION = 5;
 const BARCODE_LOOKUP_TIMEOUT_MS = 15_000;
 /** VisionScan.imageRef has no meaning for a barcode scan (no image exists); barcodeValue carries the real payload. */
 const BARCODE_SCAN_IMAGE_REF_PLACEHOLDER = 'barcode-scan';
+/** Outer backstop for OCR, looser than the adapter's own 25s — same discipline as RECOGNIZE_TIMEOUT_MS. */
+const OCR_TIMEOUT_MS = 30_000;
+/** How many catalog matches to offer as alternates when a label carries a product name. */
+const LABEL_ALTERNATE_LIMIT = 3;
 
 /**
  * The Vision scan lifecycle (Phase 2D.2 V0): CREATED -> PROCESSING -> PROPOSED ->
@@ -59,6 +67,7 @@ export class VisionScanService {
     private readonly events: EventEmitter2,
     @Inject(VISION_IMAGE_STORE) private readonly images: VisionImageStore,
     private readonly barcodeLookups: BarcodeLookupProviderRegistry,
+    private readonly ocrProviders: OCRProviderRegistry,
   ) {}
 
   /**
@@ -302,6 +311,112 @@ export class VisionScanService {
         fallback: { reason: 'PROVIDER_ERROR' },
         contractVersion: VISION_CONTRACT_VERSION,
       };
+    }
+  }
+
+  /**
+   * CREATED -> PROCESSING -> PROPOSED, the nutrition-label sibling of
+   * `createScan` (Phase 2D.2 V3.2). Reuses the image transport seam and the
+   * SAME scan lifecycle; confirm/reject/fallback are untouched.
+   *
+   * The modality's defining property: the provider TRANSCRIBES printed facts, so
+   * the proposal carries `label` (the normalized nutrition facts) alongside a
+   * one-off candidate. It never links the candidate to a catalog FoodItem —
+   * doing so would make `LogsService.resolveItem` recompute macros from that
+   * item's per-100g values and silently discard the printed numbers. Catalog
+   * matches ride along as `alternates` so a swap stays a deliberate user choice.
+   *
+   * Pipeline: extract (provider) -> parse (pure, all normalization) -> validate
+   * (pure gate) -> candidate (pure). An invalid label degrades to manual rather
+   * than proposing impossible numbers.
+   */
+  async createLabelScan(
+    userId: string,
+    imageRef: string,
+    image?: { base64: string; mimeType: string },
+  ): Promise<VisionScanProposal> {
+    const source: ScanSource = 'LABEL_OCR';
+    const storedRef = image ? await this.images.put(image.base64, image.mimeType) : null;
+    const ref = storedRef ?? imageRef;
+
+    const scan = await this.prisma.visionScan.create({
+      data: { userId, source, status: 'PROCESSING', imageRef: ref, expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS) },
+    });
+
+    try {
+      const provider = this.ocrProviders.active();
+      const extraction = await withTimeout(provider.extract({ imageRef: ref, hints: { userId } }), OCR_TIMEOUT_MS);
+
+      // All normalization is platform-side and pure — the provider only transcribed.
+      const label = parseLabel(extraction.fields, extraction.providerId);
+
+      // Validation gate: no impossible label may reach Nutrition. Fails safe,
+      // exactly like the recognition validator does for photo scans.
+      const validation = validateNutritionLabel(label);
+      if (!validation.valid) {
+        throw new Error(`OCR_INVALID_LABEL: ${validation.errors.join('; ')}`);
+      }
+
+      // Reuse the catalog matcher — never a parallel search. Offered as alternates only.
+      const alternates = label.productName
+        ? (await this.food.search(label.productName, LABEL_ALTERNATE_LIMIT, userId)).map((f) => ({
+            foodItemId: f.id,
+            displayName: f.name,
+            matchScore: f.isFavorite ? 1 : 0.75,
+          }))
+        : [];
+
+      const { candidate, scanConfidence } = buildLabelCandidate(label, validation.plausibility, alternates);
+
+      const proposal: VisionScanProposal = {
+        scanId: scan.id,
+        status: 'PROPOSED',
+        source,
+        mode: deriveUxMode(scanConfidence.band, null, 1),
+        candidates: [candidate],
+        scanConfidence,
+        suggestedMealType: inferMealType(new Date()),
+        fallback: { reason: null },
+        contractVersion: VISION_CONTRACT_VERSION,
+        label,
+      };
+
+      await this.prisma.visionScan.update({
+        where: { id: scan.id },
+        data: {
+          status: 'PROPOSED',
+          providerId: extraction.providerId,
+          providerModel: extraction.model,
+          providerVersion: extraction.providerVersion,
+          // The label rides inside `proposal` (Json) — no new column, no new table.
+          proposal: proposal as any,
+          scanConfidence: scanConfidence.overall,
+          processedAt: new Date(),
+        },
+      });
+
+      this.events.emit(VISION_EVENTS.PROPOSED, new VisionScanProposedEvent(userId, scan.id, source, 1, scanConfidence));
+      return proposal;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'UNKNOWN_ERROR';
+      await this.prisma.visionScan.update({
+        where: { id: scan.id },
+        data: { status: 'FAILED', failureReason: reason, processedAt: new Date() },
+      });
+      this.events.emit(VISION_EVENTS.FAILED, new VisionScanFailedEvent(userId, scan.id, reason));
+      return {
+        scanId: scan.id,
+        status: 'FAILED',
+        source,
+        mode: 'FALLBACK',
+        candidates: [],
+        scanConfidence: { overall: 0, band: 'LOW' },
+        suggestedMealType: inferMealType(new Date()),
+        fallback: { reason: 'PROVIDER_ERROR' },
+        contractVersion: VISION_CONTRACT_VERSION,
+      };
+    } finally {
+      if (storedRef) await this.images.discard(storedRef);
     }
   }
 

@@ -261,11 +261,22 @@ export default function LogScreen() {
           {/* ── Nutrition Vision V3.1: barcode scan (feature-flagged independently; off by default) ── */}
           {FEATURES.barcodeScan && (
             <TouchableOpacity
-              className="bg-primary/10 border border-primary/30 rounded-2xl py-3.5 px-4 mb-5 flex-row items-center justify-center gap-2"
+              className="bg-primary/10 border border-primary/30 rounded-2xl py-3.5 px-4 mb-3 flex-row items-center justify-center gap-2"
               activeOpacity={0.8}
               onPress={() => router.push('/scan-barcode' as never)} // typed routes regenerate on `expo start`
             >
               <Text className="text-primary font-semibold text-sm">📦 Escanear código de barras</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* ── Nutrition Vision V3.2: nutrition label OCR (feature-flagged independently; off by default) ── */}
+          {FEATURES.labelScan && (
+            <TouchableOpacity
+              className="bg-primary/10 border border-primary/30 rounded-2xl py-3.5 px-4 mb-5 flex-row items-center justify-center gap-2"
+              activeOpacity={0.8}
+              onPress={() => router.push('/scan-label' as never)} // typed routes regenerate on `expo start`
+            >
+              <Text className="text-primary font-semibold text-sm">🏷️ Escanear etiqueta nutricional</Text>
             </TouchableOpacity>
           )}
 

@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { VisionScanService } from './vision-scan.service';
 import { CreateScanDto } from './dto/create-scan.dto';
 import { CreateBarcodeScanDto } from './dto/create-barcode-scan.dto';
+import { CreateLabelScanDto } from './dto/create-label-scan.dto';
 import { ConfirmScanDto } from './dto/confirm-scan.dto';
 
 /**
@@ -43,6 +44,24 @@ export class VisionController {
   @Post('barcode')
   createBarcode(@Request() req: { user: { id: string } }, @Body() dto: CreateBarcodeScanDto) {
     return this.scans.createBarcodeScan(req.user.id, dto.barcode);
+  }
+
+  /**
+   * Nutrition label OCR (V3.2). Same image upload contract as POST / — the label
+   * photo terminates in the backend, which owns the provider key. The proposal
+   * comes back with `label` carrying the transcribed facts for the user to edit
+   * and confirm; confirm/reject/fallback below are shared unchanged.
+   */
+  @Post('label')
+  createLabel(@Request() req: { user: { id: string } }, @Body() dto: CreateLabelScanDto) {
+    if (!dto.imageBase64 && !dto.imageRef) {
+      throw new BadRequestException('Provide either imageBase64 (a captured label photo) or imageRef (a stable reference).');
+    }
+    if (dto.imageBase64 && !dto.imageMimeType) {
+      throw new BadRequestException('imageMimeType is required when sending imageBase64.');
+    }
+    const image = dto.imageBase64 ? { base64: dto.imageBase64, mimeType: dto.imageMimeType! } : undefined;
+    return this.scans.createLabelScan(req.user.id, dto.imageRef ?? '', image);
   }
 
   @Get(':id')

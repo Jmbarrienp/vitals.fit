@@ -12,4 +12,5 @@
 export const FEATURES = {
   visionCapture: process.env.EXPO_PUBLIC_VISION_ENABLED === 'true',
   barcodeScan: process.env.EXPO_PUBLIC_BARCODE_ENABLED === 'true',
+  labelScan: process.env.EXPO_PUBLIC_LABEL_OCR_ENABLED === 'true',
 };

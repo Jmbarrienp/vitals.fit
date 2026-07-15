@@ -12,6 +12,9 @@ import { VISION_IMAGE_STORE } from './images/image-store.port';
 import { BarcodeLookupProviderRegistry } from './barcode/barcode-lookup.registry';
 import { FixtureBarcodeLookupProvider } from './barcode/fixture-barcode-lookup.provider';
 import { OpenFoodFactsLookupProvider } from './barcode/openfoodfacts-lookup.provider';
+import { OCRProviderRegistry } from './ocr/ocr-provider.registry';
+import { FixtureOCRProvider } from './ocr/fixture-ocr.provider';
+import { ClaudeOCRProvider } from './ocr/claude-ocr.provider';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -57,6 +60,18 @@ import { OpenFoodFactsLookupProvider } from './barcode/openfoodfacts-lookup.prov
       useFactory: (config: ConfigService, fixture: FixtureBarcodeLookupProvider, off: OpenFoodFactsLookupProvider) =>
         new BarcodeLookupProviderRegistry(config, [fixture, off]),
       inject: [ConfigService, FixtureBarcodeLookupProvider, OpenFoodFactsLookupProvider],
+    },
+
+    // Nutrition-label OCR backends (V3.2) — a third registry, same swap-by-config
+    // pattern. Defaults to 'fixture' like Vision (a real OCR call costs money),
+    // not to the real provider like Barcode (whose lookup is free and keyless).
+    FixtureOCRProvider,
+    ClaudeOCRProvider,
+    {
+      provide: OCRProviderRegistry,
+      useFactory: (config: ConfigService, fixture: FixtureOCRProvider, claude: ClaudeOCRProvider) =>
+        new OCRProviderRegistry(config, [fixture, claude]),
+      inject: [ConfigService, FixtureOCRProvider, ClaudeOCRProvider],
     },
   ],
   controllers: [VisionController],

@@ -4,7 +4,7 @@
  * confirmation/rejection — it computes no nutrition and no confidence.
  */
 
-export type ScanSource = 'PHOTO' | 'BARCODE' | 'MENU_OCR' | 'RECEIPT_OCR' | 'VIDEO_FRAME';
+export type ScanSource = 'PHOTO' | 'BARCODE' | 'LABEL_OCR' | 'MENU_OCR' | 'RECEIPT_OCR' | 'VIDEO_FRAME';
 export type ScanStatus =
   | 'CREATED' | 'PROCESSING' | 'PROPOSED' | 'CONFIRMED' | 'LOGGED'
   | 'REJECTED' | 'EXPIRED' | 'FAILED' | 'FALLBACK_MANUAL';
@@ -37,6 +37,33 @@ export interface FoodCandidate {
   alternates: { foodItemId: string; displayName: string; matchScore: number }[];
 }
 
+/** Fields the backend reports as unreadable (V3.2). Pinned vocabulary — mirrors ocr-contract.ts. */
+export type NutritionLabelField =
+  | 'productName' | 'servingSize' | 'servingsPerContainer'
+  | 'calories' | 'protein' | 'carbs' | 'fat';
+
+export type ServingUnit = 'g' | 'ml' | 'unit';
+
+/**
+ * Transcribed nutrition facts from a label photo (V3.2). Every value is PER
+ * SERVING and already normalized by the backend — the client renders and edits,
+ * it never parses or converts.
+ */
+export interface NutritionLabel {
+  productName: string | null;
+  servingSize: number;
+  servingUnit: ServingUnit;
+  servingsPerContainer: number | null;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  confidence: number;
+  missingFields: NutritionLabelField[];
+  source: string;
+  version: number;
+}
+
 export interface VisionScanProposal {
   scanId: string;
   status: ScanStatus;
@@ -47,6 +74,8 @@ export interface VisionScanProposal {
   suggestedMealType: string;
   fallback: { reason: string | null };
   contractVersion: number;
+  /** Present only for LABEL_OCR scans (V3.2). */
+  label?: NutritionLabel;
 }
 
 /** Isomorphic to LogMealDto.items — confirmation converges on the existing write path. */

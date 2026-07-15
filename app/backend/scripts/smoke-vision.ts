@@ -37,6 +37,7 @@ process.env.DATABASE_URL = LOCAL_URL;
 process.env.DIRECT_URL = LOCAL_URL;
 delete process.env.VISION_PROVIDER; // force default -> fixture
 delete process.env.BARCODE_LOOKUP_PROVIDER; // force default -> openfoodfacts (still overridden explicitly per-test below)
+delete process.env.OCR_PROVIDER; // force default -> fixture
 
 const EmbeddedPostgres = require('embedded-postgres').default || require('embedded-postgres');
 const { Client } = require('pg');
@@ -65,6 +66,13 @@ import { buildBarcodeCandidate } from '../src/vision/pipeline/barcode-candidate'
 import { BarcodeLookupProviderRegistry } from '../src/vision/barcode/barcode-lookup.registry';
 import { FixtureBarcodeLookupProvider } from '../src/vision/barcode/fixture-barcode-lookup.provider';
 import { OpenFoodFactsLookupProvider } from '../src/vision/barcode/openfoodfacts-lookup.provider';
+import { buildLabelCandidate } from '../src/vision/pipeline/label-candidate';
+import { parseLabel, parseNumber, parseEnergyKcal, parseServing, parseBasis, labelCompleteness } from '../src/vision/pipeline/label-parser';
+import { validateNutritionLabel, atwaterPlausibility } from '../src/vision/pipeline/label-validator';
+import { OCRProviderRegistry } from '../src/vision/ocr/ocr-provider.registry';
+import { FixtureOCRProvider } from '../src/vision/ocr/fixture-ocr.provider';
+import { ClaudeOCRProvider } from '../src/vision/ocr/claude-ocr.provider';
+import { parseLabelExtraction, LABEL_SCHEMA, OCR_SYSTEM_PROMPT } from '../src/vision/ocr/claude-ocr.prompt';
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'prisma', 'migrations');
 
@@ -255,6 +263,109 @@ async function main() {
   const { candidate: bcNoHint } = buildBarcodeCandidate(cachedFood, null, 45);
   check('no product hint -> falls back to the FoodItem default serving (chain reused unchanged)', bcNoHint.portion.method === 'SERVING_DEFAULT' && bcNoHint.portion.grams === 45);
 
+  console.log('\n── V3.2: LABEL NUMBER PARSING (pure — locale chaos is the platform\'s job) ──');
+  check('decimal point (US)', parseNumber('3.5 g') === 3.5);
+  check('decimal comma (LATAM/EU)', parseNumber('2,3 g') === 2.3);
+  check('thousands separator is NOT read as a decimal (comma)', parseNumber('1,234') === 1234);
+  check('thousands separator is NOT read as a decimal (point)', parseNumber('1.234') === 1234);
+  check('both separators: rightmost is the decimal (EU style)', parseNumber('1.234,5') === 1234.5);
+  check('both separators: rightmost is the decimal (US style)', parseNumber('1,234.5') === 1234.5);
+  check('two decimals stay decimals, not thousands', parseNumber('12,50') === 12.5 && parseNumber('0,25') === 0.25);
+  check('tolerates units, spaces and prefixes', parseNumber('  8 g ') === 8 && parseNumber('<1 g') === 1 && parseNumber('about 8') === 8);
+  check('unreadable field -> null, never a guessed number', parseNumber('') === null && parseNumber('---') === null && parseNumber(null as any) === null);
+
+  console.log('\n── V3.2: ENERGY + SERVING + BASIS PARSING (pure) ──');
+  check('bare number on the calories line is kcal', parseEnergyKcal('240') === 240);
+  check('explicit kcal', parseEnergyKcal('132 kcal') === 132);
+  check('Spanish calorie wording', parseEnergyKcal('132 Calorías') === 132);
+  check('kJ + kcal both printed -> the kcal wins, no conversion', parseEnergyKcal('1046 kJ / 250 kcal') === 250);
+  const kjOnly = parseEnergyKcal('1046 kJ');
+  check('kJ-only label is converted deterministically', kjOnly !== null && Math.abs(kjOnly - 250) < 1, `${kjOnly}`);
+  check('US volumetric serving -> the parenthesised gram figure wins', JSON.stringify(parseServing('2/3 cup (55g)')) === JSON.stringify({ size: 55, unit: 'g' }));
+  check('metric serving', JSON.stringify(parseServing('30 g')) === JSON.stringify({ size: 30, unit: 'g' }));
+  check('liquid serving keeps ml (density is not assumed here)', JSON.stringify(parseServing('240 ml')) === JSON.stringify({ size: 240, unit: 'ml' }));
+  check('countable serving -> unit, never faked as grams', JSON.stringify(parseServing('1 barra')) === JSON.stringify({ size: 1, unit: 'unit' }));
+  check('basis detection (EU per-100g vs per-serving)', parseBasis('por 100 g') === 'HUNDRED_G' && parseBasis('Per serving') === 'SERVING' && parseBasis('') === null);
+
+  console.log('\n── V3.2: LABEL NORMALIZATION (pure — three continents, one contract) ──');
+  const usFixture = new FixtureOCRProvider();
+  const usLabel = parseLabel((await usFixture.extract({ imageRef: 'us-label.jpg' })).fields, 'fixture');
+  check('US label normalizes to per-serving canonical values', usLabel.calories === 240 && usLabel.protein === 5 && usLabel.carbs === 46 && usLabel.fat === 3.5);
+  check('US volumetric serving resolved to grams', usLabel.servingSize === 55 && usLabel.servingUnit === 'g');
+  check('US "about 8" servings per container parsed', usLabel.servingsPerContainer === 8);
+  const latamLabel = parseLabel((await usFixture.extract({ imageRef: 'latam-label.jpg' })).fields, 'fixture');
+  check('LATAM decimal commas normalize to numbers', latamLabel.protein === 2.3 && latamLabel.carbs === 22.5 && latamLabel.fat === 3.6);
+  const euLabel = parseLabel((await usFixture.extract({ imageRef: 'eu-label.jpg' })).fields, 'fixture');
+  check('EU per-100g basis is converted to the 40g serving', euLabel.calories === 100 && euLabel.protein === 3.2 && euLabel.carbs === 24 && euLabel.fat === 3.8, `${euLabel.calories}kcal`);
+  check('EU kJ/kcal line resolved to kcal before scaling', euLabel.servingSize === 40 && euLabel.servingUnit === 'g');
+  const partialLabel = parseLabel((await usFixture.extract({ imageRef: 'partial-label.jpg' })).fields, 'fixture');
+  check('an unreadable nutrient is REPORTED, never invented', partialLabel.missingFields.includes('protein') && partialLabel.protein === 0);
+  check('completeness reflects the missing required field', Math.abs(labelCompleteness(partialLabel) - 0.8) < 0.001, `${labelCompleteness(partialLabel)}`);
+  const unreadable = parseLabel((await usFixture.extract({ imageRef: 'unreadable.jpg' })).fields, 'fixture');
+  check('a fully unreadable label reports every field missing, throws nothing', unreadable.missingFields.length >= 5 && labelCompleteness(unreadable) === 0);
+  const determinism1 = parseLabel((await usFixture.extract({ imageRef: 'latam-label.jpg' })).fields, 'fixture');
+  const determinism2 = parseLabel((await usFixture.extract({ imageRef: 'latam-label.jpg' })).fields, 'fixture');
+  check('same transcription -> byte-identical label (deterministic boundary over a probabilistic provider)', JSON.stringify(determinism1) === JSON.stringify(determinism2));
+
+  console.log('\n── V3.2: LABEL VALIDATION (pure gate — never trust OCR blindly) ──');
+  check('a well-formed label passes', validateNutritionLabel(usLabel).valid === true);
+  const negative = validateNutritionLabel({ ...usLabel, protein: -5 });
+  check('negative macro -> rejected', negative.valid === false && negative.errors.some((e) => e.includes('protein')));
+  const zeroServing = validateNutritionLabel({ ...usLabel, servingSize: 0 });
+  check('serving size 0 -> rejected (nothing can be logged from it)', zeroServing.valid === false && zeroServing.errors.some((e) => e.includes('servingSize')));
+  const impossibleLabel = parseLabel((await usFixture.extract({ imageRef: 'impossible-label.jpg' })).fields, 'fixture');
+  const impossible = validateNutritionLabel(impossibleLabel);
+  check('macros outweighing the serving -> rejected as physically impossible', impossible.valid === false && impossible.errors.some((e) => e.includes('weigh more')));
+  const overCap = validateNutritionLabel({ ...usLabel, calories: 99_999 });
+  check('a value the confirm endpoint would 400 on is rejected HERE, not at the last step', overCap.valid === false && overCap.errors.some((e) => e.includes('maximum')));
+  check('Atwater-consistent label -> full plausibility', atwaterPlausibility(usLabel) === 1);
+  // A misread macro digit ("50g" for "5g") is caught by BOTH independent checks:
+  // it fails mass conservation outright, and it is Atwater-implausible.
+  const misreadMacro = { ...usLabel, protein: 50 };
+  check('a misread macro digit is caught by mass conservation (hard reject)', validateNutritionLabel(misreadMacro).valid === false && atwaterPlausibility(misreadMacro) < 0.6);
+  // A misread CALORIE digit ("840" for "240") is mass-legal — only Atwater sees it.
+  const misreadCalories = { ...usLabel, calories: 840 };
+  const misreadOutcome = validateNutritionLabel(misreadCalories);
+  check('a misread calorie digit is mass-legal -> caught by Atwater as a SOFT signal, not a reject', misreadOutcome.valid === true && misreadOutcome.plausibility < 0.6, `plausibility=${misreadOutcome.plausibility.toFixed(2)}`);
+  check('0 kcal alongside real macros is inconsistent, but still the user\'s call', atwaterPlausibility({ ...usLabel, calories: 0 }) < 0.5 && validateNutritionLabel({ ...usLabel, calories: 0 }).valid === true);
+  check('plausibility never rejects a legitimately imperfect label', validateNutritionLabel(latamLabel).valid === true && validateNutritionLabel(euLabel).valid === true);
+
+  console.log('\n── V3.2: LABEL CANDIDATE (pure — facts, never a catalog override) ──');
+  const { candidate: labelCandidate, scanConfidence: labelConfidence } = buildLabelCandidate(usLabel, 1);
+  check('a label candidate is ALWAYS a one-off — linking a catalog food would discard the printed macros', labelCandidate.foodItemId === null && labelCandidate.matchScore === 0);
+  check('the serving becomes the portion', labelCandidate.portion.grams === 55 && labelCandidate.portion.method === 'PROVIDER_ESTIMATE');
+  check('a clean, complete, plausible label reaches HIGH', labelConfidence.band === 'HIGH', `${labelConfidence.overall.toFixed(2)}`);
+  const { scanConfidence: partialConfidence } = buildLabelCandidate(partialLabel, 1);
+  check('a partial label drops out of HIGH -> the user reviews it', partialConfidence.band !== 'HIGH', `${partialConfidence.band}`);
+  const { scanConfidence: misreadConfidence } = buildLabelCandidate(usLabel, 0.2);
+  check('low plausibility drags confidence down even when every field was read', misreadConfidence.overall < labelConfidence.overall);
+  const { candidate: countable } = buildLabelCandidate({ ...usLabel, servingUnit: 'unit', servingSize: 1 }, 1);
+  check('an unconvertible serving degrades the portion method, never fakes grams', countable.portion.method === 'SERVING_DEFAULT' && countable.portion.confidence < 0.5);
+
+  console.log('\n── V3.2: OCR REGISTRY + PROMPT CONTAINMENT (pure) ──');
+  const ocrSwap = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'claude' }), [usFixture, new ClaudeOCRProvider(new ConfigService({}), new EphemeralImageStore())]);
+  check('config selects the active OCR provider (swap to claude)', ocrSwap.active().id === 'claude');
+  const ocrDefault = new OCRProviderRegistry(new ConfigService({}), [usFixture]);
+  check('default OCR provider is fixture (a real OCR call costs money, unlike barcode)', ocrDefault.active().id === 'fixture');
+  let ocrSwapThrew = false;
+  try { new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'ghost' }), [usFixture]).active(); } catch { ocrSwapThrew = true; }
+  check('unknown OCR provider throws (fails loud, not silent)', ocrSwapThrew === true);
+  const claudeOcrNoKey = new ClaudeOCRProvider(new ConfigService({}), new EphemeralImageStore());
+  check('OCR adapter reports hasKey=false with no API key (coach pattern)', claudeOcrNoKey.hasKey === false);
+  let ocrNoKeyErr = '';
+  try { await claudeOcrNoKey.extract({ imageRef: 'x.jpg' }); } catch (e: any) { ocrNoKeyErr = String(e.message); }
+  check('no key -> raises before any network call', ocrNoKeyErr.includes('OCR_PROVIDER_UNAVAILABLE'));
+  const claudeOcrFakeKey = new ClaudeOCRProvider(new ConfigService({ ANTHROPIC_API_KEY: 'sk-ant-not-a-real-key' }), new EphemeralImageStore());
+  let ocrUnresolvedErr = '';
+  try { await claudeOcrFakeKey.extract({ imageRef: 'no-such-ref.jpg' }); } catch (e: any) { ocrUnresolvedErr = String(e.message); }
+  check('unresolvable image -> raises BEFORE spending a provider call', ocrUnresolvedErr.includes('OCR_IMAGE_UNRESOLVED'));
+  check('schema forbids extra keys and requires every slot', (LABEL_SCHEMA as any).additionalProperties === false && (LABEL_SCHEMA as any).required.length === 9);
+  check('prompt instructs transcription, forbids conversion/computation (platform owns normalization)', OCR_SYSTEM_PROMPT.includes('TRANSCRIBE, NO INTERPRETES') && OCR_SYSTEM_PROMPT.includes('NUNCA inventes un número'));
+  const extractionParsed = parseLabelExtraction({ productName: ' Galletas ', calories: '132 kcal', protein: '2,3 g', confidence: 5 });
+  check('extraction parser keeps slots as VERBATIM strings — it does not parse numbers', extractionParsed.protein === '2,3 g' && extractionParsed.calories === '132 kcal');
+  check('extraction parser is total: missing slots -> "", out-of-range confidence clamped', extractionParsed.fat === '' && extractionParsed.basis === '' && extractionParsed.confidence === 1);
+  check('extraction parser tolerates a non-conforming payload', parseLabelExtraction(null).calories === '' && parseLabelExtraction('nope' as any).confidence === 0);
+
   // ── PART B: full lifecycle integration (embedded DB + fixture provider) ──
   console.log('\n── INTEGRATION (embedded Postgres + fixture provider) ──');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-vision-'));
@@ -273,7 +384,8 @@ async function main() {
   const registry = new VisionProviderRegistry(new ConfigService({}), [new FixtureVisionProvider()]);
   const imageStore = new EphemeralImageStore();
   const barcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'fixture' }), [new FixtureBarcodeLookupProvider(), new OpenFoodFactsLookupProvider()]);
-  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry);
+  const ocrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'fixture' }), [new FixtureOCRProvider()]);
+  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry);
 
   const user = await prisma.user.create({ data: { email: 'vision@test.local' } });
   await prisma.goal.create({ data: { userId: user.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
@@ -348,7 +460,7 @@ async function main() {
 
   // ── provider failure -> FAILED, never a broken scan, manual fallback signaled ──
   const failRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'nonexistent' }), [new FixtureVisionProvider()]);
-  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry);
+  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry);
   const failedProposal = await failVisionSvc.createScan(user.id, 'anything.jpg', 'PHOTO');
   check('unknown provider -> scan FAILED, not thrown to the caller', failedProposal.status === 'FAILED' && failedProposal.fallback.reason === 'PROVIDER_ERROR');
   const failedScanRow = await prisma.visionScan.findUnique({ where: { id: failedProposal.scanId } });
@@ -362,7 +474,7 @@ async function main() {
     async recognize() { return { providerId: 'bad', detections: 'not-an-array' } as any; },
   };
   const badRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'bad' }), [badProvider]);
-  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry);
+  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry);
   const badProposal = await badSvc.createScan(user.id, 'chicken.jpg', 'PHOTO');
   check('malformed provider response -> scan FAILED (validation gate, fail-safe)', badProposal.status === 'FAILED');
   const badRow = await prisma.visionScan.findUnique({ where: { id: badProposal.scanId } });
@@ -442,11 +554,11 @@ async function main() {
   console.log('\n── V3.1: PROVIDER FAILURE / OFFLINE (network error, not "not found") ──');
   const throwingBarcodeProvider = { id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } };
   const throwingRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'throws' }), [throwingBarcodeProvider]);
-  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry);
+  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry);
   const throwScan = await throwingSvc.createBarcodeScan(user.id, '2223334445556');
   check('a real lookup failure (offline/timeout) is distinct from not-found — scan FAILED, same degradation contract as vision', throwScan.status === 'FAILED' && throwScan.fallback.reason === 'PROVIDER_ERROR' && throwScan.mode === 'FALLBACK');
   const unknownBarcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'ghost-barcode' }), [barcodeFixture]);
-  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry);
+  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry);
   const unknownScan = await unknownBarcodeSvc.createBarcodeScan(user.id, '3334445556667');
   check('a misconfigured provider id fails the scan gracefully, never throws to the caller', unknownScan.status === 'FAILED' && unknownScan.mode === 'FALLBACK');
 
@@ -466,6 +578,64 @@ async function main() {
   const barcodeLoggedMeal = await prisma.loggedMeal.findFirst({ where: { visionScanId: firstScan.scanId } });
   check('LoggedMeal was created through the SAME write path, with barcode provenance', barcodeLoggedMeal?.source === 'vision' && barcodeLoggedMeal?.visionScanId === firstScan.scanId);
   check('confirmScan/rejectScan/getScan needed ZERO changes for barcode — the scan lifecycle is source-agnostic', (await prisma.visionScan.findUnique({ where: { id: firstScan.scanId } }))?.status === 'LOGGED');
+
+  console.log('\n── V3.2: LABEL OCR SCAN LIFECYCLE (fixture OCR provider, real DB) ──');
+  const labelScan = await visionSvc.createLabelScan(user.id, 'us-label.jpg');
+  check('a readable label produces a normal PROPOSED proposal', labelScan.status === 'PROPOSED' && labelScan.candidates.length === 1);
+  check('the proposal carries the transcribed facts for the user to edit', !!labelScan.label && labelScan.label!.calories === 240 && labelScan.label!.protein === 5);
+  check('label source is LABEL_OCR — a distinct modality from MENU_OCR/RECEIPT_OCR', labelScan.source === 'LABEL_OCR');
+  check('a confident label reaches CONFIRM', labelScan.mode === 'CONFIRM', `${labelScan.mode}`);
+  check('the candidate is a one-off (the label is the truth for this package)', labelScan.candidates[0].foodItemId === null);
+  const labelScanRow = await prisma.visionScan.findUnique({ where: { id: labelScan.scanId } });
+  check('the label persists INSIDE the proposal JSON — no new column, no new table', (labelScanRow!.proposal as any).label?.calories === 240 && labelScanRow!.barcodeValue === null);
+  check('provenance stamped for eval attribution', labelScanRow!.providerId === 'fixture' && labelScanRow!.providerModel === 'fixture-ocr-v1');
+
+  console.log('\n── V3.2: LABEL MATCHING REUSE (catalog offered, never forced) ──');
+  await prisma.foodItem.create({ data: { name: 'Honey Nut Cereal', nameLower: 'honey nut cereal', nameNormalized: 'honey nut cereal', nameAliases: [], caloriesPer100g: 380, proteinPer100g: 8, carbsPer100g: 84, fatPer100g: 4, fiberPer100g: 3, source: 'curated_latam', isCommon: true } });
+  const matchedLabelScan = await visionSvc.createLabelScan(user.id, 'us-label.jpg');
+  check('a catalog match is surfaced as an ALTERNATE via the reused FoodService.search', matchedLabelScan.candidates[0].alternates.length > 0 && matchedLabelScan.candidates[0].alternates[0].displayName === 'Honey Nut Cereal');
+  check('...but the primary candidate STAYS a one-off — the printed macros are not overridden by the catalog', matchedLabelScan.candidates[0].foodItemId === null && matchedLabelScan.label!.calories === 240);
+
+  console.log('\n── V3.2: DEGRADATION (partial, impossible, unreadable, provider failure) ──');
+  const partialScan = await visionSvc.createLabelScan(user.id, 'partial-label.jpg');
+  check('a partially readable label still PROPOSES (editable), never fails outright', partialScan.status === 'PROPOSED' && !!partialScan.label);
+  check('the missing field is reported so mobile opens it for editing', partialScan.label!.missingFields.includes('protein'));
+  check('a partial label is not presented as confident', partialScan.mode !== 'CONFIRM', `${partialScan.mode}`);
+  const impossibleScan = await visionSvc.createLabelScan(user.id, 'impossible-label.jpg');
+  check('a physically impossible label FAILS the validation gate — never proposed to the user', impossibleScan.status === 'FAILED' && impossibleScan.mode === 'FALLBACK');
+  const impossibleRow = await prisma.visionScan.findUnique({ where: { id: impossibleScan.scanId } });
+  check('the validation failure is recorded for audit', impossibleRow!.failureReason?.includes('OCR_INVALID_LABEL') === true);
+  const unreadableScan = await visionSvc.createLabelScan(user.id, 'unreadable-label.jpg');
+  check('an unreadable label degrades to manual (serving 0 cannot be logged)', unreadableScan.status === 'FAILED' && unreadableScan.mode === 'FALLBACK');
+  const throwingOcrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'throws' }), [{ id: 'throws', async extract() { throw new Error('NETWORK_TIMEOUT'); } }]);
+  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry);
+  const ocrFailScan = await throwingOcrSvc.createLabelScan(user.id, 'us-label.jpg');
+  check('an OCR provider failure degrades to manual, never throws to the caller', ocrFailScan.status === 'FAILED' && ocrFailScan.fallback.reason === 'PROVIDER_ERROR');
+
+  console.log('\n── V3.2: CONFIRM CONVERGES ON THE SAME WRITE PATH (label macros, one-off item) ──');
+  const labelCandidateToLog = labelScan.candidates[0];
+  const labelConfirmResult = await visionSvc.confirmScan(user.id, {
+    scanId: labelScan.scanId,
+    mealType: labelScan.suggestedMealType,
+    items: [{
+      foodItemId: null,
+      customName: labelScan.label!.productName,
+      quantity: labelCandidateToLog.portion.grams,
+      unit: 'g',
+      grams: labelCandidateToLog.portion.grams,
+      calories: labelScan.label!.calories,
+      proteinG: labelScan.label!.protein,
+      carbsG: labelScan.label!.carbs,
+      fatG: labelScan.label!.fat,
+      acceptedFromCandidate: 0,
+    }],
+  } as any);
+  check('label confirm returns today (unchanged confirmScan/LogsService contract)', !!labelConfirmResult);
+  const labelMeal = await prisma.loggedMeal.findFirst({ where: { visionScanId: labelScan.scanId }, include: { items: true } });
+  check('LoggedMeal created through the SAME write path, with vision provenance', labelMeal?.source === 'vision' && labelMeal?.visionScanId === labelScan.scanId);
+  check("the label's OWN macros were logged verbatim — LogsService trusted them via the existing one-off path", labelMeal?.totalCalories === 240 && Number(labelMeal?.totalProteinG) === 5);
+  check('the item is a one-off snapshot, not a catalog link', labelMeal?.items[0].foodItemId === null && labelMeal?.items[0].nameSnapshot === 'Honey Nut Cereal');
+  check('confirmScan needed ZERO changes for a third modality', (await prisma.visionScan.findUnique({ where: { id: labelScan.scanId } }))?.status === 'LOGGED');
 
   console.log('\n── NO-BYPASS INVARIANT ──');
   const visionMeals = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, source: 'vision' } });
@@ -487,7 +657,7 @@ async function main() {
   try { await pg.stop(); } catch { /* teardown */ }
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 
-  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1`);
+  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1+V3.2`);
   process.exit(failures === 0 ? 0 : 1);
 }
 

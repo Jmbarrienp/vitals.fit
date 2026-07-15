@@ -25,6 +25,13 @@ export const visionApi = {
   createBarcodeScan: (barcode: string) =>
     apiClient.post<VisionScanProposal>('/vision/scans/barcode', { barcode }),
 
+  /** V3.2: a nutrition-label photo. The backend transcribes + normalizes; the proposal comes back with `label` for the user to edit and confirm. */
+  createLabelScan: (imageRef: string, image?: CapturedImage) =>
+    apiClient.post<VisionScanProposal>('/vision/scans/label', {
+      imageRef,
+      ...(image ? { imageBase64: image.base64, imageMimeType: image.mimeType } : {}),
+    }),
+
   getScan: (id: string) => apiClient.get<VisionScanProposal>(`/vision/scans/${id}`),
 
   confirm: (id: string, items: ScanConfirmationItem[], mealType?: string) =>

@@ -7,9 +7,17 @@
  * Design reference: docs/nutrition-vision-architecture.md (§4).
  */
 
+import { NutritionLabel } from './ocr-contract';
+
 export const VISION_CONTRACT_VERSION = 1;
 
-export type ScanSource = 'PHOTO' | 'BARCODE' | 'MENU_OCR' | 'RECEIPT_OCR' | 'VIDEO_FRAME'; // growable
+/**
+ * growable. `LABEL_OCR` (V3.2) is a nutrition-facts panel — distinct from
+ * MENU_OCR (a restaurant menu) and RECEIPT_OCR (a purchase receipt), which read
+ * different documents for different purposes. Adding a member costs nothing: the
+ * column is a String, never a Postgres enum (lesson 2B.1), so no migration.
+ */
+export type ScanSource = 'PHOTO' | 'BARCODE' | 'LABEL_OCR' | 'MENU_OCR' | 'RECEIPT_OCR' | 'VIDEO_FRAME';
 
 export type ScanStatus =
   | 'CREATED'
@@ -94,6 +102,18 @@ export interface VisionScanProposal {
   suggestedMealType: string;
   fallback: { reason: string | null }; // set when degraded -> mobile opens manual flow prefilled
   contractVersion: number;
+  /**
+   * The transcribed nutrition facts — present ONLY for `source: 'LABEL_OCR'`
+   * (V3.2). Optional and additive: every existing consumer ignores it, and no
+   * other modality sets it.
+   *
+   * This is the one place the vision contract carries nutrition, and only because
+   * OCR transcribes what a manufacturer printed rather than inferring it from
+   * appearance. `RecognitionResult` still carries perception only — see the
+   * epistemic split documented in `ocr-contract.ts`. Mobile renders these as
+   * EDITABLE fields; the user confirms every number before anything is logged.
+   */
+  label?: NutritionLabel;
 }
 
 /** What confirmation sends back. Deliberately isomorphic to LogMealDto.items. */
