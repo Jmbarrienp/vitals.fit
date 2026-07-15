@@ -42,6 +42,7 @@ model User {
   foodFavorites   FoodFavorite[]
   nutritionState  UserNutritionState?
   weeklySnapshots WeeklyNutritionSnapshot[]
+  visionScans     VisionScan[]
 
   @@index([email])
   @@index([deletedAt])
@@ -475,9 +476,14 @@ model LoggedMeal {
   totalProteinG Float
   totalCarbsG   Float
   totalFatG     Float
+  // Provenance (Nutrition Vision V0). String, not a Postgres enum — new sources
+  // (barcode, OCR, …) must never require a migration (lesson from 2B.1's enum values).
+  source        String   @default("manual") // 'manual' | 'vision' | future sources
+  visionScanId  String?  @unique // set when a confirmed VisionScan produced this meal
 
-  dailyLog DailyLog        @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
-  items    LoggedMealItem[]
+  dailyLog   DailyLog        @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  items      LoggedMealItem[]
+  visionScan VisionScan?     @relation(fields: [visionScanId], references: [id], onDelete: SetNull)
 }
 
 model LoggedMealItem {
@@ -500,6 +506,69 @@ model LoggedMealItem {
 
   @@index([loggedMealId])
   @@index([foodItemId])
+}
+
+// ─────────────────────────────────────────────
+// NUTRITION VISION (2D.2 V0 — design-only until this slice; see
+// docs/nutrition-vision-architecture.md). Vision is a plug-in: it never writes
+// LoggedMeal directly — confirmation hands off to LogsService.logMeal(), the
+// platform's single existing write path. `detections`/`proposal` are Json
+// deliberately (provider output shape churns; the typed contract lives at the
+// API layer, not the DB). All vocabularies are Strings + TS unions, never
+// Postgres enums (lesson from 2B.1: a new enum value is a breaking read for
+// any older Prisma Client already deployed against the same database).
+// ─────────────────────────────────────────────
+
+model VisionScan {
+  id       String @id @default(uuid())
+  userId   String
+  source   String // 'PHOTO' | 'BARCODE' | 'MENU_OCR' | 'RECEIPT_OCR' | 'VIDEO_FRAME' (growable)
+  status   String // 'CREATED'|'PROCESSING'|'PROPOSED'|'CONFIRMED'|'LOGGED'|'REJECTED'|'EXPIRED'|'FAILED'
+  imageRef String // storage reference (e.g. Supabase Storage path), never raw bytes in the DB
+
+  providerId      String? // which VisionProvider handled this scan (e.g. 'fixture', 'claude')
+  providerModel   String?
+  providerVersion String?
+
+  detections     Json? // raw RecognitionResult.detections — audit + future eval corpus
+  proposal       Json? // the VisionScanProposal shown to the user (contract-versioned)
+  scanConfidence Float? // denormalized overall confidence, for dashboards/queries
+
+  failureReason String? // set on FAILED / EXPIRED
+
+  createdAt   DateTime  @default(now())
+  processedAt DateTime? // when RECOGNIZE finished
+  confirmedAt DateTime?
+  expiresAt   DateTime // PROPOSED scans past this are lazily swept to EXPIRED (no cron)
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meal     LoggedMeal?
+  feedback VisionFeedback[]
+
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+}
+
+// The continuous-improvement corpus: one row per candidate the user acted on.
+// Read-only to the rest of the platform; feeds future eval/auto-accept work.
+model VisionFeedback {
+  id             String @id @default(uuid())
+  scanId         String
+  userId         String
+  detectionIndex Int
+
+  proposedFoodItemId  String?
+  confirmedFoodItemId String?
+  proposedGrams       Float?
+  confirmedGrams      Float?
+  action              String // 'ACCEPTED'|'SWAPPED'|'EDITED_PORTION'|'REMOVED'|'ADDED_MANUAL'
+
+  createdAt DateTime @default(now())
+
+  scan VisionScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@index([userId, createdAt])
 }
 
 // ─────────────────────────────────────────────

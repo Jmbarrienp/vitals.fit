@@ -19,7 +19,8 @@
     "smoke:contract": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-contract.ts",
     "smoke:coach": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-coach.ts",
     "smoke:planner": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-planner.ts",
-    "smoke:mealplan": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-mealplan.ts"
+    "smoke:mealplan": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-mealplan.ts",
+    "smoke:vision": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-vision.ts"
   },
   "keywords": [],
   "author": "",
