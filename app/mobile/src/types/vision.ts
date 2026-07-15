@@ -10,7 +10,24 @@ export type ScanStatus =
   | 'REJECTED' | 'EXPIRED' | 'FAILED' | 'FALLBACK_MANUAL';
 export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'LOW';
 export type ScanUxMode = 'CONFIRM' | 'REVIEW' | 'FALLBACK';
-export type PortionMethod = 'REFERENCE_OBJECT' | 'PLATE_RATIO' | 'PROVIDER_ESTIMATE' | 'SERVING_DEFAULT' | 'USER';
+export type PortionMethod =
+  | 'REFERENCE_OBJECT'
+  | 'PLATE_RATIO'
+  | 'PROVIDER_ESTIMATE'
+  | 'SERVING_DEFAULT'
+  | 'USER'
+  | 'USER_PRIOR' // V3.3: the user's own history dominated the blend
+  | 'BLENDED'; // V3.3: several signals combined, none dominant
+
+/** One input the portion engine (V3.3) blended into the final grams — mirrors vision-contract.ts. */
+export type PortionSignalSource = 'VISION' | 'USER_HISTORY' | 'PLANNER' | 'CATALOG_DEFAULT';
+
+export interface PortionSignal {
+  source: PortionSignalSource;
+  grams: number;
+  weight: number;
+  note: string;
+}
 export type VisionFoodSource = 'favorite' | 'frequent' | 'recent' | 'custom' | 'catalog';
 
 export interface PortionEstimate {
@@ -35,6 +52,8 @@ export interface FoodCandidate {
   portion: PortionEstimate;
   confidence: CandidateConfidence;
   alternates: { foodItemId: string; displayName: string; matchScore: number }[];
+  /** V3.3 — how the backend arrived at portion.grams. Optional/additive. */
+  portionExplanation?: PortionSignal[];
 }
 
 /** Fields the backend reports as unreadable (V3.2). Pinned vocabulary — mirrors ocr-contract.ts. */

@@ -9,8 +9,13 @@ import { Detection, PortionEstimate } from '../types/vision-contract';
  */
 
 const FALLBACK_GRAMS = 100;
-const MIN_GRAMS = 10;
-const MAX_GRAMS = 600;
+export const MIN_GRAMS = 10;
+export const MAX_GRAMS = 600;
+
+/** Shared plausibility bounds — the portion engine (V3.3) clamps its blend with the same limits. */
+export function clampGrams(grams: number): number {
+  return Math.max(MIN_GRAMS, Math.min(MAX_GRAMS, Math.round(grams)));
+}
 
 export function estimatePortion(detection: Detection, defaultServingGrams: number | null): PortionEstimate {
   if (detection.portionHint?.grams != null && detection.portionHint.grams > 0) {
@@ -29,5 +34,5 @@ export function estimatePortion(detection: Detection, defaultServingGrams: numbe
 }
 
 function clamp(grams: number): number {
-  return Math.max(MIN_GRAMS, Math.min(MAX_GRAMS, Math.round(grams)));
+  return clampGrams(grams);
 }

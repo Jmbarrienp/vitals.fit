@@ -154,9 +154,19 @@ function CandidateRow({ c, checked, onToggle }: { c: FoodCandidate; checked: boo
       <View className="flex-1">
         <Text className="text-text-primary text-sm">{c.displayName}</Text>
         <Text className="text-text-muted text-[10px]">
-          {matched ? `~${c.portion.grams}g` : 'no reconocido — regístralo a mano'}
+          {matched ? `~${c.portion.grams}g${portionHint(c)}` : 'no reconocido — regístralo a mano'}
         </Text>
       </View>
     </TouchableOpacity>
   );
+}
+
+/**
+ * V3.3 — when the backend's portion engine leaned on the user's own history,
+ * say so. The platform decided the grams; this only surfaces the why.
+ */
+function portionHint(c: FoodCandidate): string {
+  if (c.portion.method === 'USER_PRIOR') return ' · según tu historial';
+  if (c.portion.method === 'BLENDED') return ' · ajustado a tu historial';
+  return '';
 }

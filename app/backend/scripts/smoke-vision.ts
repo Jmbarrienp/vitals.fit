@@ -16,7 +16,11 @@
  * raw image bytes never reach the database, and (V3.1) that barcode is another
  * producer into the SAME VisionScan lifecycle — local-cache resolution,
  * external lookup + catalog upsert, not-found degradation, and duplicate scans
- * resolving to one FoodItem, not two.
+ * resolving to one FoodItem, not two. (V3.3) adds the Portion Estimation
+ * Engine: priors derived from the user's own validated logs, the correction
+ * corpus finally read, planner expectations blended, and the learning loop —
+ * the same user scanning the same food gets progressively better estimates,
+ * deterministically, with zero LLM involvement.
  */
 import 'reflect-metadata';
 import * as fs from 'fs';
@@ -73,6 +77,10 @@ import { OCRProviderRegistry } from '../src/vision/ocr/ocr-provider.registry';
 import { FixtureOCRProvider } from '../src/vision/ocr/fixture-ocr.provider';
 import { ClaudeOCRProvider } from '../src/vision/ocr/claude-ocr.provider';
 import { parseLabelExtraction, LABEL_SCHEMA, OCR_SYSTEM_PROMPT } from '../src/vision/ocr/claude-ocr.prompt';
+import { resolvePortion, PortionPriorInputs } from '../src/vision/pipeline/portion-engine';
+import { median, mad, selectPrior, computeBias, historyWeight } from '../src/vision/pipeline/portion-priors';
+import { PortionPriorReader } from '../src/vision/priors/portion-prior.reader';
+import { inferMealType } from '../src/vision/pipeline/build-candidates';
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'prisma', 'migrations');
 
@@ -366,6 +374,64 @@ async function main() {
   check('extraction parser is total: missing slots -> "", out-of-range confidence clamped', extractionParsed.fat === '' && extractionParsed.basis === '' && extractionParsed.confidence === 1);
   check('extraction parser tolerates a non-conforming payload', parseLabelExtraction(null).calories === '' && parseLabelExtraction('nope' as any).confidence === 0);
 
+  console.log('\n── V3.3: PORTION PRIORS (pure statistics — deterministic learning) ──');
+  check('median: odd length', median([3, 1, 2]) === 2);
+  check('median: even length averages the middle pair', median([100, 200]) === 150);
+  check('median: single observation', median([80]) === 80);
+  const madSample = [160, 165, 170, 165, 900];
+  check('MAD is robust: one absurd log cannot inflate the spread', mad(madSample, median(madSample)) === 5);
+  check('selectPrior: below 2 observations there is no notion of "typical"', selectPrior([150], []) === null);
+  check('selectPrior: 2 observations -> ALL_MEALS prior', selectPrior([150, 170], [])?.scope === 'ALL_MEALS');
+  const mealTypePrior = selectPrior([150, 170, 80, 85, 90], [80, 85, 90]);
+  check('selectPrior: meal-type subset preferred once it has 3+ observations (lunch rice ≠ dinner rice)', mealTypePrior?.scope === 'MEAL_TYPE' && mealTypePrior?.median === 85);
+  check('historyWeight grows with evidence: n=3 half-trust, n=12 dominant', historyWeight(3) === 0.5 && historyWeight(12) === 0.8);
+  check('historyWeight is capped — 100 logs trust no more than 12', historyWeight(100) === historyWeight(12));
+  check('computeBias: below 5 corrections -> no bias (noise, not signal)', computeBias([0.8, 0.8, 0.8, 0.8]) === null);
+  check('computeBias: median of the correction ratios', computeBias([0.8, 0.8, 0.8, 0.8, 0.8]) === 0.8);
+  check('computeBias: ACCEPTED rows (ratio 1) regularize toward no-correction', computeBias([0.5, 1, 1, 1, 1]) === 1);
+  check('computeBias: clamped to a sane range — a 9× "bias" is a data problem, not a correction', computeBias([9, 9, 9, 9, 9]) === 2 && computeBias([0.01, 0.01, 0.01, 0.01, 0.01]) === 0.5);
+
+  console.log('\n── V3.3: PORTION ENGINE (pure — the platform owns the final grams) ──');
+  const visionBase = { grams: 150, method: 'PROVIDER_ESTIMATE' as const, confidence: 0.5 };
+  const newUserResolved = resolvePortion(visionBase, null);
+  check('new user (no priors fetched) -> base estimate passes through untouched', newUserResolved.portion.grams === 150 && newUserResolved.portion.method === 'PROVIDER_ESTIMATE' && newUserResolved.portion.confidence === 0.5);
+  check('…and the decision is still explained (single VISION signal)', newUserResolved.explanation.length === 1 && newUserResolved.explanation[0].source === 'VISION');
+  const noHistory: PortionPriorInputs = { userFoodGrams: [], userFoodMealTypeGrams: [], plannerExpectedGrams: null, visionBiasRatios: [] };
+  const emptyResolved = resolvePortion(visionBase, noHistory);
+  check('priors fetched but empty -> still identical to base (regression guard)', emptyResolved.portion.grams === 150 && emptyResolved.portion.method === 'PROVIDER_ESTIMATE');
+
+  const strongPrior: PortionPriorInputs = { userFoodGrams: [165, 160, 170, 165, 168, 162, 165, 167, 164, 166], userFoodMealTypeGrams: [165, 160, 170, 165, 168, 162, 165, 167, 164, 166], plannerExpectedGrams: null, visionBiasRatios: [] };
+  const wrongClaude = resolvePortion({ grams: 400, method: 'PROVIDER_ESTIMATE', confidence: 0.5 }, strongPrior);
+  check('wrong model estimate (400g) vs 10-log prior (~165g) -> history dominates', wrongClaude.portion.method === 'USER_PRIOR' && Math.abs(wrongClaude.portion.grams - 165) < Math.abs(wrongClaude.portion.grams - 400), `${wrongClaude.portion.grams}g`);
+  check('strong tight prior -> HIGH portion confidence (the platform KNOWS this user)', wrongClaude.portion.confidence >= 0.85);
+  const historySignal = wrongClaude.explanation.find((s) => s.source === 'USER_HISTORY');
+  check('explanation carries the history signal with a dominant weight', !!historySignal && historySignal!.weight > 0.7);
+  const agreeing = resolvePortion({ grams: 163, method: 'PROVIDER_ESTIMATE', confidence: 0.5 }, strongPrior);
+  check('model AGREEING with history -> corroboration bonus on top of the prior tier', agreeing.portion.confidence > 0.85);
+
+  const weakPrior: PortionPriorInputs = { userFoodGrams: [165, 160], userFoodMealTypeGrams: [], plannerExpectedGrams: null, visionBiasRatios: [] };
+  const weakResolved = resolvePortion({ grams: 400, method: 'PROVIDER_ESTIMATE', confidence: 0.5 }, weakPrior);
+  check('2-log prior blends but does not dominate', weakResolved.portion.method === 'BLENDED');
+  check('progressive trust: more history pulls the estimate closer to the user', Math.abs(wrongClaude.portion.grams - 165) < Math.abs(weakResolved.portion.grams - 165), `n=10 -> ${wrongClaude.portion.grams}g, n=2 -> ${weakResolved.portion.grams}g`);
+
+  const withPlan = resolvePortion(visionBase, { ...noHistory, plannerExpectedGrams: 200 });
+  check('planner expectation shifts the blend toward the plan', withPlan.portion.grams > 150 && withPlan.portion.grams < 200, `${withPlan.portion.grams}g`);
+  check('planner signal has a fixed LOW weight — the plan says SHOULD, not IS', withPlan.explanation.find((s) => s.source === 'PLANNER')!.weight === 0.15);
+
+  const biased = resolvePortion({ grams: 200, method: 'PROVIDER_ESTIMATE', confidence: 0.5 }, { ...noHistory, visionBiasRatios: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8] });
+  check('correction engine: learned bias rescales the model estimate (200 × 0.8 = 160)', biased.portion.grams === 160);
+  check('bias correction is explained, never silent', biased.explanation[0].note.includes('0.80'));
+
+  const servingBlend = resolvePortion({ grams: 120, method: 'SERVING_DEFAULT', confidence: 0.35 }, strongPrior);
+  check('catalog-default base + strong prior -> history dominates', servingBlend.portion.method === 'USER_PRIOR');
+  check('catalog default labeled CATALOG_DEFAULT, not VISION (it is knowledge, not perception)', servingBlend.explanation[0].source === 'CATALOG_DEFAULT');
+
+  const det1 = resolvePortion({ grams: 400, method: 'PROVIDER_ESTIMATE', confidence: 0.5 }, strongPrior);
+  const det2 = resolvePortion({ grams: 400, method: 'PROVIDER_ESTIMATE', confidence: 0.5 }, strongPrior);
+  check('determinism: same inputs -> byte-identical output', JSON.stringify(det1) === JSON.stringify(det2));
+  const absurdPrior: PortionPriorInputs = { userFoodGrams: [5000, 5000, 5000, 5000], userFoodMealTypeGrams: [], plannerExpectedGrams: null, visionBiasRatios: [] };
+  check('blend clamped to plausible grams (shared 10..600 bounds)', resolvePortion(visionBase, absurdPrior).portion.grams <= 600);
+
   // ── PART B: full lifecycle integration (embedded DB + fixture provider) ──
   console.log('\n── INTEGRATION (embedded Postgres + fixture provider) ──');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-vision-'));
@@ -385,7 +451,8 @@ async function main() {
   const imageStore = new EphemeralImageStore();
   const barcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'fixture' }), [new FixtureBarcodeLookupProvider(), new OpenFoodFactsLookupProvider()]);
   const ocrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'fixture' }), [new FixtureOCRProvider()]);
-  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry);
+  const priorReader = new PortionPriorReader(prisma);
+  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader);
 
   const user = await prisma.user.create({ data: { email: 'vision@test.local' } });
   await prisma.goal.create({ data: { userId: user.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
@@ -460,7 +527,7 @@ async function main() {
 
   // ── provider failure -> FAILED, never a broken scan, manual fallback signaled ──
   const failRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'nonexistent' }), [new FixtureVisionProvider()]);
-  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry);
+  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader);
   const failedProposal = await failVisionSvc.createScan(user.id, 'anything.jpg', 'PHOTO');
   check('unknown provider -> scan FAILED, not thrown to the caller', failedProposal.status === 'FAILED' && failedProposal.fallback.reason === 'PROVIDER_ERROR');
   const failedScanRow = await prisma.visionScan.findUnique({ where: { id: failedProposal.scanId } });
@@ -474,7 +541,7 @@ async function main() {
     async recognize() { return { providerId: 'bad', detections: 'not-an-array' } as any; },
   };
   const badRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'bad' }), [badProvider]);
-  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry);
+  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader);
   const badProposal = await badSvc.createScan(user.id, 'chicken.jpg', 'PHOTO');
   check('malformed provider response -> scan FAILED (validation gate, fail-safe)', badProposal.status === 'FAILED');
   const badRow = await prisma.visionScan.findUnique({ where: { id: badProposal.scanId } });
@@ -554,11 +621,11 @@ async function main() {
   console.log('\n── V3.1: PROVIDER FAILURE / OFFLINE (network error, not "not found") ──');
   const throwingBarcodeProvider = { id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } };
   const throwingRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'throws' }), [throwingBarcodeProvider]);
-  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry);
+  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry, priorReader);
   const throwScan = await throwingSvc.createBarcodeScan(user.id, '2223334445556');
   check('a real lookup failure (offline/timeout) is distinct from not-found — scan FAILED, same degradation contract as vision', throwScan.status === 'FAILED' && throwScan.fallback.reason === 'PROVIDER_ERROR' && throwScan.mode === 'FALLBACK');
   const unknownBarcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'ghost-barcode' }), [barcodeFixture]);
-  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry);
+  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry, priorReader);
   const unknownScan = await unknownBarcodeSvc.createBarcodeScan(user.id, '3334445556667');
   check('a misconfigured provider id fails the scan gracefully, never throws to the caller', unknownScan.status === 'FAILED' && unknownScan.mode === 'FALLBACK');
 
@@ -608,7 +675,7 @@ async function main() {
   const unreadableScan = await visionSvc.createLabelScan(user.id, 'unreadable-label.jpg');
   check('an unreadable label degrades to manual (serving 0 cannot be logged)', unreadableScan.status === 'FAILED' && unreadableScan.mode === 'FALLBACK');
   const throwingOcrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'throws' }), [{ id: 'throws', async extract() { throw new Error('NETWORK_TIMEOUT'); } }]);
-  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry);
+  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry, priorReader);
   const ocrFailScan = await throwingOcrSvc.createLabelScan(user.id, 'us-label.jpg');
   check('an OCR provider failure degrades to manual, never throws to the caller', ocrFailScan.status === 'FAILED' && ocrFailScan.fallback.reason === 'PROVIDER_ERROR');
 
@@ -637,6 +704,79 @@ async function main() {
   check('the item is a one-off snapshot, not a catalog link', labelMeal?.items[0].foodItemId === null && labelMeal?.items[0].nameSnapshot === 'Honey Nut Cereal');
   check('confirmScan needed ZERO changes for a third modality', (await prisma.visionScan.findUnique({ where: { id: labelScan.scanId } }))?.status === 'LOGGED');
 
+  console.log('\n── V3.3: THE LEARNING LOOP (same user, same food, better every scan) ──');
+  const learner = await prisma.user.create({ data: { email: 'vision-learner@test.local' } });
+  await prisma.goal.create({ data: { userId: learner.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
+  const nowMealType = inferMealType(new Date());
+
+  // Scan 1 — no history. The fixture proposes pollo at 180g (PROVIDER_ESTIMATE).
+  const scan1 = await visionSvc.createScan(learner.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  const scan1Pollo = scan1.candidates[0];
+  check('new user -> portion is the raw provider estimate (nothing invented)', scan1Pollo.portion.grams === 180 && scan1Pollo.portion.method === 'PROVIDER_ESTIMATE');
+  check('new user -> explanation has exactly one signal (no phantom priors)', scan1Pollo.portionExplanation?.length === 1 && scan1Pollo.portionExplanation?.[0].source === 'VISION');
+
+  // The user corrects: they actually ate 250g. That edit is supervision.
+  await visionSvc.confirmScan(learner.id, {
+    scanId: scan1.scanId,
+    mealType: nowMealType,
+    items: [{ foodItemId: scan1Pollo.foodItemId, quantity: 250, unit: 'g', grams: 250, acceptedFromCandidate: 0 }],
+  });
+  const learnerFeedback = await prisma.visionFeedback.findFirst({ where: { userId: learner.id } });
+  check('the correction is captured as EDITED_PORTION with method attribution (V3.3 column)', learnerFeedback?.action === 'EDITED_PORTION' && learnerFeedback?.proposedMethod === 'PROVIDER_ESTIMATE');
+  const learnerRatios = await priorReader.visionBiasRatios(learner.id);
+  check('the correction corpus is finally READ: ratio 250/180 surfaces for future scans', learnerRatios.length === 1 && Math.abs(learnerRatios[0] - 250 / 180) < 1e-9);
+
+  // Two more real meals of the same food at 250g -> 3 validated observations.
+  for (let i = 0; i < 2; i++) {
+    await logsSvc.logMeal(learner.id, { mealType: nowMealType, items: [{ foodItemId: pollo.id, quantity: 250, unit: 'g' }] } as any);
+  }
+
+  // Scan 2 — the platform now has a 3-log prior. Expected blend: (180·0.7 + 250·0.5)/1.2 = 209.
+  const scan2 = await visionSvc.createScan(learner.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  const scan2Pollo = scan2.candidates[0];
+  check('3-log prior -> BLENDED estimate, no longer the raw model number', scan2Pollo.portion.method === 'BLENDED', scan2Pollo.portion.method);
+  check('estimate moved toward what the user actually eats', Math.abs(scan2Pollo.portion.grams - 250) < Math.abs(180 - 250), `${scan2Pollo.portion.grams}g`);
+  check('deterministic blend: exactly the arithmetic the docs promise', scan2Pollo.portion.grams === 209, `${scan2Pollo.portion.grams}g`);
+  check('explanation now shows BOTH signals with their weights', scan2Pollo.portionExplanation?.length === 2 && !!scan2Pollo.portionExplanation?.find((s: any) => s.source === 'USER_HISTORY'));
+
+  // Five more meals at 250g -> 8 observations, zero variance. History should now dominate.
+  for (let i = 0; i < 5; i++) {
+    await logsSvc.logMeal(learner.id, { mealType: nowMealType, items: [{ foodItemId: pollo.id, quantity: 250, unit: 'g' }] } as any);
+  }
+  const scan3 = await visionSvc.createScan(learner.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  const scan3Pollo = scan3.candidates[0];
+  check('8-log tight prior -> USER_PRIOR: the user outweighs the model', scan3Pollo.portion.method === 'USER_PRIOR', scan3Pollo.portion.method);
+  check('progressively better: scan3 closer to 250g than scan2, scan2 closer than scan1', Math.abs(scan3Pollo.portion.grams - 250) < Math.abs(scan2Pollo.portion.grams - 250) && Math.abs(scan2Pollo.portion.grams - 250) < Math.abs(180 - 250), `180 -> ${scan2Pollo.portion.grams} -> ${scan3Pollo.portion.grams}`);
+  check('portion confidence rose with evidence (0.7 provider -> 0.85 platform-known)', scan3Pollo.portion.confidence === 0.85);
+  check('Claude became less important WITHOUT any provider change (same fixture, same detections)', scan1Pollo.portion.grams === 180 && scan3Pollo.portion.grams !== 180);
+
+  // Determinism: scanning again with unchanged history yields the identical portion.
+  const scan4 = await visionSvc.createScan(learner.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  check('determinism: same history -> identical portion decision', JSON.stringify(scan4.candidates[0].portion) === JSON.stringify(scan3Pollo.portion));
+  const persistedScan3 = await prisma.visionScan.findUnique({ where: { id: scan3.scanId } });
+  check('the persisted proposal carries the deterministic explanation — an audit trail, never a Claude assumption', Array.isArray((persistedScan3?.proposal as any)?.candidates?.[0]?.portionExplanation));
+
+  console.log('\n── V3.3: PLANNER EXPECTATION (read-only reuse — planner decisions untouched) ──');
+  const planUser = await prisma.user.create({ data: { email: 'vision-planner@test.local' } });
+  const plan = await prisma.mealPlan.create({ data: { userId: planUser.id, isActive: true } });
+  const day1 = await prisma.mealPlanDay.create({ data: { mealPlanId: plan.id, dayNumber: 1, targetCalories: 2000, targetProteinG: 150, targetCarbsG: 200, targetFatG: 60 } });
+  const day2 = await prisma.mealPlanDay.create({ data: { mealPlanId: plan.id, dayNumber: 2, targetCalories: 2000, targetProteinG: 150, targetCarbsG: 200, targetFatG: 60 } });
+  const pm1 = await prisma.plannedMeal.create({ data: { mealPlanDayId: day1.id, mealType: nowMealType as any, name: 'Comida plan A', totalCalories: 500, totalProteinG: 40, totalCarbsG: 30, totalFatG: 15 } });
+  const pm2 = await prisma.plannedMeal.create({ data: { mealPlanDayId: day2.id, mealType: nowMealType as any, name: 'Comida plan B', totalCalories: 500, totalProteinG: 40, totalCarbsG: 30, totalFatG: 15 } });
+  await prisma.plannedMealItem.create({ data: { plannedMealId: pm1.id, foodItemId: pollo.id, amountG: 160, calories: 264, proteinG: 49.6, carbsG: 0, fatG: 5.8 } });
+  await prisma.plannedMealItem.create({ data: { plannedMealId: pm2.id, foodItemId: pollo.id, amountG: 200, calories: 330, proteinG: 62, carbsG: 0, fatG: 7.2 } });
+  const expectedFromPlan = await priorReader.plannerExpectedGrams(planUser.id, pollo.id, nowMealType);
+  check('planner expectation = median across the active plan days (day-agnostic by design)', expectedFromPlan === 180);
+  const planScan = await visionSvc.createScan(planUser.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  const planSignal = planScan.candidates[0].portionExplanation?.find((s: any) => s.source === 'PLANNER');
+  check('a scan for a planned user blends the plan expectation (explanation shows it)', !!planSignal && planSignal!.grams === 180);
+  check('vision agreeing with the plan -> the blend lands on the plan amount', planScan.candidates[0].portion.grams === 180, `${planScan.candidates[0].portion.grams}g`);
+
+  console.log('\n── V3.3: PRIOR READER RESILIENCE (an enhancement may never fail a scan) ──');
+  check('unknown user -> no observations, no crash', (await priorReader.userFoodObservations('00000000-0000-0000-0000-000000000000', pollo.id)).length === 0);
+  check('unknown user -> no bias, no crash', (await priorReader.visionBiasRatios('00000000-0000-0000-0000-000000000000')).length === 0);
+  check('no active plan -> null expectation, no crash', (await priorReader.plannerExpectedGrams(learner.id, pollo.id, nowMealType)) === null);
+
   console.log('\n── NO-BYPASS INVARIANT ──');
   const visionMeals = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, source: 'vision' } });
   const nonVisionScanRows = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, visionScanId: null, source: 'vision' } });
@@ -657,7 +797,7 @@ async function main() {
   try { await pg.stop(); } catch { /* teardown */ }
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 
-  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1+V3.2`);
+  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1+V3.2+V3.3`);
   process.exit(failures === 0 ? 0 : 1);
 }
 

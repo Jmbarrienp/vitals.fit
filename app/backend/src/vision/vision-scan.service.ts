@@ -14,6 +14,8 @@ import { validateNutritionLabel } from './pipeline/label-validator';
 import { deriveUxMode } from './pipeline/confidence';
 import { BarcodeLookupProviderRegistry } from './barcode/barcode-lookup.registry';
 import { OCRProviderRegistry } from './ocr/ocr-provider.registry';
+import { PortionPriorReader } from './priors/portion-prior.reader';
+import { PortionPriorInputs } from './pipeline/portion-engine';
 import {
   VISION_EVENTS,
   VisionScanConfirmedEvent,
@@ -68,6 +70,7 @@ export class VisionScanService {
     @Inject(VISION_IMAGE_STORE) private readonly images: VisionImageStore,
     private readonly barcodeLookups: BarcodeLookupProviderRegistry,
     private readonly ocrProviders: OCRProviderRegistry,
+    private readonly priors: PortionPriorReader,
   ) {}
 
   /**
@@ -124,7 +127,34 @@ export class VisionScanService {
         }),
       );
 
-      const { candidates, scanConfidence } = buildCandidates(result.detections, searchResultsByIndex, defaultServingByIndex);
+      // V3.3 — portion priors. One bias fetch per scan (it is user-level), one
+      // observation/planner fetch per matched candidate. Priors are an
+      // enhancement: the reader fails soft, and unmatched detections get none.
+      const suggestedMealType = inferMealType(new Date());
+      const biasRatios = await this.priors.visionBiasRatios(userId);
+      const priorInputsByIndex: (PortionPriorInputs | null)[] = await Promise.all(
+        searchResultsByIndex.map(async (results) => {
+          const top = results[0];
+          if (!top) return null;
+          const [observations, plannerExpectedGrams] = await Promise.all([
+            this.priors.userFoodObservations(userId, top.id),
+            this.priors.plannerExpectedGrams(userId, top.id, suggestedMealType),
+          ]);
+          return {
+            userFoodGrams: observations.map((o) => o.amountG),
+            userFoodMealTypeGrams: observations.filter((o) => o.mealType === suggestedMealType).map((o) => o.amountG),
+            plannerExpectedGrams,
+            visionBiasRatios: biasRatios,
+          };
+        }),
+      );
+
+      const { candidates, scanConfidence } = buildCandidates(
+        result.detections,
+        searchResultsByIndex,
+        defaultServingByIndex,
+        priorInputsByIndex,
+      );
       const fallbackReason = candidates.length === 0 ? 'NO_DETECTIONS' : null;
 
       const proposal: VisionScanProposal = {
@@ -134,7 +164,7 @@ export class VisionScanService {
         mode: deriveUxMode(scanConfidence.band, fallbackReason, candidates.length),
         candidates,
         scanConfidence,
-        suggestedMealType: inferMealType(new Date()),
+        suggestedMealType,
         fallback: { reason: fallbackReason },
         contractVersion: VISION_CONTRACT_VERSION,
       };
@@ -553,6 +583,10 @@ export class VisionScanService {
         confirmedFoodItemId: item.foodItemId,
         proposedGrams: candidate?.portion.grams ?? null,
         confirmedGrams: item.grams ?? null,
+        // V3.3 — which strategy produced proposedGrams. Without it the correction
+        // engine can't tell a model error from a catalog-default mismatch, and
+        // would learn bias from the wrong signal.
+        proposedMethod: candidate?.portion.method ?? null,
         action,
       };
     });

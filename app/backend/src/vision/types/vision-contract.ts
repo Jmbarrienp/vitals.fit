@@ -45,7 +45,26 @@ export type PortionMethod =
   | 'PLATE_RATIO'
   | 'PROVIDER_ESTIMATE'
   | 'SERVING_DEFAULT'
-  | 'USER';
+  | 'USER'
+  | 'USER_PRIOR' // V3.3: the user's own history dominated the blend
+  | 'BLENDED'; // V3.3: several signals combined, none dominant
+
+/**
+ * One input the Portion Estimation Engine (V3.3) blended into the final grams.
+ * VISION is the provider's opinion (already bias-corrected); USER_HISTORY is
+ * the median of the user's validated logs; PLANNER is what the active plan
+ * expects; CATALOG_DEFAULT is the food's default serving. Weights and notes are
+ * platform-computed — this is the deterministic, explainable audit trail of
+ * every portion decision.
+ */
+export type PortionSignalSource = 'VISION' | 'USER_HISTORY' | 'PLANNER' | 'CATALOG_DEFAULT';
+
+export interface PortionSignal {
+  source: PortionSignalSource;
+  grams: number;
+  weight: number; // 0..1 relative weight in the blend
+  note: string; // human-readable, deterministic explanation
+}
 
 /** One food region a provider detected in an image. Multi-food from day one. */
 export interface Detection {
@@ -89,6 +108,13 @@ export interface FoodCandidate {
   portion: PortionEstimate;
   confidence: CandidateConfidence;
   alternates: { foodItemId: string; displayName: string; matchScore: number }[];
+  /**
+   * V3.3 — how the portion engine arrived at `portion.grams`. Additive and
+   * optional: pre-V3.3 proposals persisted without it, and consumers that
+   * ignore it lose nothing. Only deterministic platform output is ever stored
+   * here — never a raw provider assumption.
+   */
+  portionExplanation?: PortionSignal[];
 }
 
 /** The scan result exposed to mobile. No Prisma types, no vendor types. */

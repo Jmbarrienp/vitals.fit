@@ -564,6 +564,11 @@ model VisionFeedback {
   proposedGrams       Float?
   confirmedGrams      Float?
   action              String // 'ACCEPTED'|'SWAPPED'|'EDITED_PORTION'|'REMOVED'|'ADDED_MANUAL'
+  // V3.3 — which PortionMethod produced proposedGrams ('PROVIDER_ESTIMATE',
+  // 'SERVING_DEFAULT', 'USER_PRIOR', 'BLENDED', …). Lets the correction engine
+  // attribute an edit to the right signal; null on pre-V3.3 rows (excluded from
+  // bias learning by construction). String, never a Postgres enum (lesson 2B.1).
+  proposedMethod      String?
 
   createdAt DateTime @default(now())
 

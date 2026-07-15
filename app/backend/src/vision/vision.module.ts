@@ -15,6 +15,7 @@ import { OpenFoodFactsLookupProvider } from './barcode/openfoodfacts-lookup.prov
 import { OCRProviderRegistry } from './ocr/ocr-provider.registry';
 import { FixtureOCRProvider } from './ocr/fixture-ocr.provider';
 import { ClaudeOCRProvider } from './ocr/claude-ocr.provider';
+import { PortionPriorReader } from './priors/portion-prior.reader';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -33,6 +34,11 @@ import { ClaudeOCRProvider } from './ocr/claude-ocr.provider';
   imports: [FoodModule, LogsModule],
   providers: [
     VisionScanService,
+
+    // Portion priors (V3.3) — the engine's only I/O. Reads corpora the platform
+    // already owns (LoggedMealItem, VisionFeedback, PlannedMealItem); the blend
+    // itself is pure and lives in pipeline/portion-engine.ts.
+    PortionPriorReader,
 
     // Image transport — the seam that lets a real provider get bytes without the port carrying them.
     EphemeralImageStore,
