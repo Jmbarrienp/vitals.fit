@@ -208,6 +208,11 @@ export class VisionScanService {
           detections: result.detections as any,
           proposal: proposal as any,
           scanConfidence: scanConfidence.overall,
+          // V3.5 — telemetry the platform used to discard. Nulls stay null:
+          // an unmeasured latency must never masquerade as a fast one.
+          latencyMs: result.latencyMs ?? null,
+          tokensIn: result.usage?.inputTokens ?? null,
+          tokensOut: result.usage?.outputTokens ?? null,
           processedAt: new Date(),
         },
       });

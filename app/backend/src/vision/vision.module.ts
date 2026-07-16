@@ -19,6 +19,10 @@ import { PortionPriorReader } from './priors/portion-prior.reader';
 import { RestaurantMenuProviderRegistry } from './restaurant/restaurant-menu.registry';
 import { NullRestaurantMenuProvider } from './restaurant/null-restaurant-menu.provider';
 import { FixtureRestaurantMenuProvider } from './restaurant/fixture-restaurant-menu.provider';
+import { GroundTruthReader } from './learning/ground-truth.reader';
+import { ReplayEngine } from './learning/replay.engine';
+import { EvaluationEngine } from './learning/evaluation.engine';
+import { LearningController } from './learning/learning.controller';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -96,8 +100,16 @@ import { FixtureRestaurantMenuProvider } from './restaurant/fixture-restaurant-m
         new RestaurantMenuProviderRegistry(config, [none, fixture]),
       inject: [ConfigService, NullRestaurantMenuProvider, FixtureRestaurantMenuProvider],
     },
+
+    // Continuous Learning & Evaluation (V3.5) — the permanent, read-only
+    // subsystem that turns user confirmations into provider scorecards,
+    // calibration curves and promotion decisions. Providers are temporary;
+    // this data is permanent.
+    GroundTruthReader,
+    ReplayEngine,
+    EvaluationEngine,
   ],
-  controllers: [VisionController],
+  controllers: [VisionController, LearningController],
   exports: [VisionScanService],
 })
 export class VisionModule {}

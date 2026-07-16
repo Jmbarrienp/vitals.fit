@@ -536,6 +536,14 @@ model VisionScan {
   proposal       Json? // the VisionScanProposal shown to the user (contract-versioned)
   scanConfidence Float? // denormalized overall confidence, for dashboards/queries
 
+  // V3.5 — operational telemetry the platform used to measure and then DISCARD.
+  // Null = recorded before V3.5 (unmeasured), never zero. tokensIn/Out are
+  // provider-agnostic counters (cost proxy); the vendor payload still never
+  // touches the database.
+  latencyMs Float?
+  tokensIn  Int?
+  tokensOut Int?
+
   failureReason String? // set on FAILED / EXPIRED
 
   createdAt   DateTime  @default(now())

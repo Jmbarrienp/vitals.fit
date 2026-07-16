@@ -115,6 +115,12 @@ export class ClaudeVisionProvider implements VisionProvider {
       detections: parseDetections(payload),
       scene: parseScene(payload),
       latencyMs,
+      // V3.5 — plain counters for the evaluation engine's cost metric. Numbers
+      // only; the vendor-shaped usage object stays inside `raw` as before.
+      usage: {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      },
       // Audit only, and never persisted by the service. Deliberately excludes the
       // prompt and the response text so no vendor payload can leak through `raw`.
       raw: {

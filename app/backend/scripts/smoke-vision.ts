@@ -466,6 +466,10 @@ async function main() {
   const sceneBad = validateRecognitionResult({ providerId: 'x', model: 'm', providerVersion: '1', latencyMs: 1, detections: [], scene: { setting: 'DISCO', confidence: 7 } });
   check('a malformed scene is STRIPPED — the scan is never hostage to an optional cue', sceneBad.valid === true && (sceneBad.result as any).scene === undefined);
   check('pre-V3.4 providers (no scene at all) validate unchanged', validateRecognitionResult({ providerId: 'x', model: 'm', providerVersion: '1', latencyMs: 1, detections: [] }).valid === true);
+  const usageOk = validateRecognitionResult({ providerId: 'x', model: 'm', providerVersion: '1', latencyMs: 1, detections: [], usage: { inputTokens: 10, outputTokens: 5 } });
+  check('V3.5: valid usage telemetry passes the gate intact', usageOk.valid === true && (usageOk.result as any).usage?.inputTokens === 10);
+  const usageBad = validateRecognitionResult({ providerId: 'x', model: 'm', providerVersion: '1', latencyMs: 1, detections: [], usage: { inputTokens: -5 } });
+  check('V3.5: malformed usage is STRIPPED — a billing counter never costs a proposal', usageBad.valid === true && (usageBad.result as any).usage === undefined);
 
   console.log('\n── V3.4: MENU REGISTRY + PROVIDERS + SCENE PARSER (pure) ──');
   const noneProvider = new NullRestaurantMenuProvider();
@@ -536,6 +540,7 @@ async function main() {
 
   const persisted = await prisma.visionScan.findUnique({ where: { id: proposal.scanId } });
   check('scan persisted as PROPOSED with provider provenance', persisted?.status === 'PROPOSED' && persisted?.providerId === 'fixture');
+  check('V3.5: latency telemetry persisted (the platform used to discard it); tokens null for the keyless fixture', (persisted as any)?.latencyMs === 1 && (persisted as any)?.tokensIn === null && (persisted as any)?.tokensOut === null);
 
   const confirmResult = await visionSvc.confirmScan(user.id, {
     scanId: proposal.scanId,

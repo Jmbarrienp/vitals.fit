@@ -106,6 +106,12 @@ export interface RecognitionResult {
    */
   scene?: SceneContext;
   latencyMs: number;
+  /**
+   * V3.5 — provider-agnostic usage accounting (cost proxy for the evaluation
+   * engine). Plain numbers only: what a call consumed, never HOW (no vendor
+   * payload shapes). Optional and additive; the fixture reports nothing.
+   */
+  usage?: { inputTokens: number; outputTokens: number };
   raw?: unknown; // stored for audit/eval; never consumed by downstream logic
 }
 

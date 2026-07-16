@@ -44,8 +44,23 @@ export function validateRecognitionResult(raw: unknown): ValidationOutcome {
     delete r.scene;
   }
 
+  // V3.5 — usage is telemetry, same policy as scene: optional, and stripped
+  // when malformed rather than failing the scan. A billing counter must never
+  // cost a user their proposal.
+  if (r.usage !== undefined && !isValidUsage(r.usage)) {
+    delete r.usage;
+  }
+
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, errors: [], result: raw as unknown as RecognitionResult };
+}
+
+function isValidUsage(u: unknown): boolean {
+  if (!isObject(u)) return false;
+  return (
+    isFiniteNumber(u.inputTokens) && (u.inputTokens as number) >= 0 &&
+    isFiniteNumber(u.outputTokens) && (u.outputTokens as number) >= 0
+  );
 }
 
 const SCENE_SETTINGS = ['RESTAURANT', 'HOME', 'UNKNOWN'];
