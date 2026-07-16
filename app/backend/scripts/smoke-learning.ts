@@ -32,6 +32,7 @@ process.env.DIRECT_URL = LOCAL_URL;
 
 const EmbeddedPostgres = require('embedded-postgres').default || require('embedded-postgres');
 const { Client } = require('pg');
+const { ConfigService } = require('@nestjs/config');
 
 import { PrismaService } from '../src/prisma/prisma.service';
 import { FoodService } from '../src/food/food.service';
@@ -46,8 +47,18 @@ import {
   CalibrationCurve,
   EVAL_CONTRACT_VERSION,
   GroundTruthDataset,
+  ProviderComparison,
   ProviderScorecard,
 } from '../src/vision/learning/types/eval-contract';
+import { computeTrust, decayFactor, daysBetween } from '../src/vision/learning/pipeline/trust';
+import { decideAutoAccept, AutoAcceptInput, UNDO_WINDOW_SECONDS } from '../src/vision/learning/pipeline/auto-accept';
+import { TrustEvidence, TRUST_POLICY_VERSION } from '../src/vision/learning/types/trust-contract';
+import { deriveUxMode } from '../src/vision/pipeline/confidence';
+import { PromotionExecutor } from '../src/vision/learning/promotion.executor';
+import { VisionProviderRegistry } from '../src/vision/providers/provider.registry';
+import { FixtureVisionProvider } from '../src/vision/providers/fixture.provider';
+import { TrustEvidenceReader } from '../src/vision/learning/trust-evidence.reader';
+import { TrustAuditService } from '../src/vision/learning/trust-audit.service';
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'prisma', 'migrations');
 
@@ -134,6 +145,116 @@ async function main() {
   check('empty dataset -> every metric null, sample sizes zero', emptyCard.top1Accuracy === null && emptyCard.meanLatencyMs === null && emptyCard.failureRate === null && emptyCard.medianPortionErrorPct === null && emptyCard.sampleSizes.scans === 0);
   check('empty dataset -> empty breakdowns, versioned contract', Object.keys(emptyCard.perFood).length === 0 && emptyCard.contractVersion === EVAL_CONTRACT_VERSION);
 
+  console.log('\n── V3.6: TRUST ENGINE (pure — earned, decaying, never granted) ──');
+  const NOW = new Date('2026-07-16T12:00:00Z');
+  const ev = (over: Partial<TrustEvidence> = {}): TrustEvidence => ({
+    userId: 'u', foodItemId: 'f', modality: 'PHOTO',
+    confirmations: 0, corrections: 0, undos: 0,
+    lastConfirmedAt: null, lastUndoAt: null, userTotalConfirmations: 20,
+    ...over,
+  });
+  const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000);
+
+  const newUser = computeTrust(ev({ userTotalConfirmations: 0 }), 0.9, 0.9, NOW);
+  check('new user + unknown food -> NONE, score 0 (trust is never granted)', newUser.level === 'NONE' && newUser.score === 0);
+  check('…and it says so in platform vocabulary', newUser.signals.includes('NEW_USER') && newUser.signals.includes('UNKNOWN_FOOD'));
+
+  const once = computeTrust(ev({ confirmations: 1, lastConfirmedAt: daysAgo(0) }), 0.9, 0.9, NOW);
+  check('one sighting is not a pattern -> MEDIUM (0.5), never HIGH', once.level === 'MEDIUM' && once.score === 0.5);
+  const fifth = computeTrust(ev({ confirmations: 5, lastConfirmedAt: daysAgo(0) }), 0.9, 0.9, NOW);
+  check('the goal narrative: 5 clean confirmations -> HIGH (0.8333)', fifth.level === 'HIGH' && fifth.score === 0.8333, `${fifth.score}`);
+  const twiceBarcode = computeTrust(ev({ confirmations: 2, modality: 'BARCODE', lastConfirmedAt: daysAgo(0) }), 1, 1, NOW);
+  check('a clean 2-confirmation record reaches HIGH — barcode CAN graduate at its minimum', twiceBarcode.level === 'HIGH' && twiceBarcode.score === 0.6667);
+
+  const corrected = computeTrust(ev({ confirmations: 5, corrections: 1, lastConfirmedAt: daysAgo(0) }), 0.9, 0.9, NOW);
+  check('a correction costs 2 confirmations -> drops out of HIGH', corrected.level === 'MEDIUM' && corrected.score === 0.5952, `${corrected.score}`);
+  check('…and explains itself', corrected.signals.includes('RECENT_CORRECTIONS') && corrected.reasons.some((r) => r.includes('impecable')));
+  const recovered = computeTrust(ev({ confirmations: 12, corrections: 1, lastConfirmedAt: daysAgo(0) }), 0.9, 0.9, NOW);
+  check('…but evidence recovers trust: 12 confirmations outweigh one old correction', recovered.level === 'HIGH');
+
+  const undone = computeTrust(ev({ confirmations: 20, undos: 1, lastConfirmedAt: daysAgo(0), lastUndoAt: daysAgo(2) }), 0.9, 0.9, NOW);
+  check('CATASTROPHIC: one recent undo zeroes trust instantly, whatever the history', undone.level === 'NONE' && undone.score === 0);
+  check('…named as a recent undo, with the cooldown stated', undone.signals.includes('RECENT_UNDO') && undone.reasons.some((r) => r.includes('14')));
+  const oldUndo = computeTrust(ev({ confirmations: 20, undos: 1, lastConfirmedAt: daysAgo(0), lastUndoAt: daysAgo(30) }), 0.9, 0.9, NOW);
+  check('an OLD undo still costs 5 confirmations but no longer blocks outright', oldUndo.level === 'HIGH' && !oldUndo.signals.includes('RECENT_UNDO'));
+  const undoDominates = computeTrust(ev({ confirmations: 3, undos: 1, lastConfirmedAt: daysAgo(0), lastUndoAt: daysAgo(30) }), 0.9, 0.9, NOW);
+  check('with little history, one old undo still dominates', undoDominates.level !== 'HIGH', `${undoDominates.score}`);
+
+  const decayed = computeTrust(ev({ confirmations: 5, lastConfirmedAt: daysAgo(45) }), 0.9, 0.9, NOW);
+  check('decay: 45 days (one half-life) halves earned trust -> out of HIGH', decayed.level === 'MEDIUM' && decayed.score === 0.4167, `${decayed.score}`);
+  check('…and says why', decayed.signals.includes('TRUST_DECAYED'));
+  check('decay is exponential and exact at the half-life', decayFactor(45) === 0.5 && decayFactor(90) === 0.25 && decayFactor(0) === 1);
+  check('no permanent trust: 180 days of inactivity -> NONE', computeTrust(ev({ confirmations: 5, lastConfirmedAt: daysAgo(180) }), 0.9, 0.9, NOW).level === 'NONE');
+  check('a future timestamp cannot manufacture trust (clock skew guard)', daysBetween(new Date(NOW.getTime() + 86_400_000), NOW) === 0);
+
+  const uncalibrated = computeTrust(ev({ confirmations: 5, lastConfirmedAt: daysAgo(0) }), 0.9, 0.5, NOW);
+  check('a reported 0.9 that historically means 0.5 is flagged CALIBRATED_LOW', uncalibrated.signals.includes('CALIBRATED_LOW') && uncalibrated.signals.includes('HIGH_CONFIDENCE'));
+  check('trust is deterministic', JSON.stringify(computeTrust(ev({ confirmations: 5, lastConfirmedAt: daysAgo(3) }), 0.9, 0.9, NOW)) === JSON.stringify(computeTrust(ev({ confirmations: 5, lastConfirmedAt: daysAgo(3) }), 0.9, 0.9, NOW)));
+  check('policy version travels on every decision', fifth.policyVersion === TRUST_POLICY_VERSION);
+
+  console.log('\n── V3.6: AUTO-ACCEPT POLICY (pure — modalities graduate differently) ──');
+  const aaInput = (over: Partial<AutoAcceptInput> = {}): AutoAcceptInput => ({
+    trust: fifth, modality: 'PHOTO', calibratedConfidence: 0.9,
+    fallbackReason: null, candidateCount: 1, allCandidatesGraduated: true, enabled: true,
+    ...over,
+  });
+  const graduated = decideAutoAccept(aaInput());
+  check('the goal narrative: 5th grilled chicken -> AUTO_ACCEPT, executed', graduated.action === 'AUTO_ACCEPT' && graduated.executed === true);
+  check('…with an undo window and a reason in the user language', graduated.undoWindowSeconds === UNDO_WINDOW_SECONDS && graduated.reason.includes('5 confirmaciones'));
+  check('SHADOW MODE: disabled -> decided AUTO_ACCEPT but never acts, no undo window', (() => { const d = decideAutoAccept(aaInput({ enabled: false })); return d.action === 'AUTO_ACCEPT' && d.executed === false && d.undoWindowSeconds === 0; })());
+
+  check('barcode graduates EARLIEST (2 confirmations is enough)', decideAutoAccept(aaInput({ trust: twiceBarcode, modality: 'BARCODE', calibratedConfidence: 1 })).action === 'AUTO_ACCEPT');
+  check('the same 2 confirmations do NOT graduate a photo', decideAutoAccept(aaInput({ trust: twiceBarcode, modality: 'PHOTO' })).action === 'REVIEW_REQUIRED');
+  const restaurantTrust = computeTrust(ev({ confirmations: 5, modality: 'RESTAURANT', lastConfirmedAt: daysAgo(0) }), 0.9, 0.9, NOW);
+  check('restaurant graduates LAST: 5 confirmations still not enough (needs 8)', decideAutoAccept(aaInput({ trust: restaurantTrust, modality: 'RESTAURANT' })).action === 'REVIEW_REQUIRED');
+  check('…and the reason states the gap', decideAutoAccept(aaInput({ trust: restaurantTrust, modality: 'RESTAURANT' })).reason.includes('5/8'));
+  check('OCR sits between barcode and vision (needs 3)', decideAutoAccept(aaInput({ trust: computeTrust(ev({ confirmations: 3, modality: 'LABEL_OCR', lastConfirmedAt: daysAgo(0) }), 0.9, 0.9, NOW), modality: 'LABEL_OCR' })).action === 'AUTO_ACCEPT');
+
+  check('a degraded scan is never a trust question -> MANUAL_REVIEW', decideAutoAccept(aaInput({ fallbackReason: 'PROVIDER_ERROR' })).action === 'MANUAL_REVIEW');
+  check('zero candidates -> MANUAL_REVIEW', decideAutoAccept(aaInput({ candidateCount: 0 })).action === 'MANUAL_REVIEW');
+  check('a plate is only as trusted as its least-known food', decideAutoAccept(aaInput({ candidateCount: 3, allCandidatesGraduated: false })).action === 'REVIEW_REQUIRED');
+  check('an uncalibrated provider may never auto-accept (null != trusted)', decideAutoAccept(aaInput({ calibratedConfidence: null })).action === 'REVIEW_REQUIRED');
+  check('a confidence that historically over-promises may never auto-accept', decideAutoAccept(aaInput({ calibratedConfidence: 0.5 })).action === 'REVIEW_REQUIRED');
+  check('trust NONE -> REVIEW_REQUIRED, never auto-accept', decideAutoAccept(aaInput({ trust: undone })).action === 'REVIEW_REQUIRED');
+  check('decayed trust -> REVIEW_REQUIRED (earned once is not earned forever)', decideAutoAccept(aaInput({ trust: decayed })).action === 'REVIEW_REQUIRED');
+  check('every decision carries its trust and policy version', graduated.trust.level === 'HIGH' && graduated.policyVersion === TRUST_POLICY_VERSION);
+  check('auto-accept policy is deterministic', JSON.stringify(decideAutoAccept(aaInput())) === JSON.stringify(decideAutoAccept(aaInput())));
+
+  console.log('\n── V3.6: PROMOTION EXECUTOR (recommends; can never act) ──');
+  const registryWithClaude = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'fixture' }), [
+    new FixtureVisionProvider(),
+    { id: 'claude', capabilities: { multiFood: true, portionHints: true, barcode: false, ocr: false, video: false }, async recognize() { throw new Error('not called'); } } as any,
+  ]);
+  const executor = new PromotionExecutor({} as any, registryWithClaude, new ConfigService({ VISION_PROVIDER: 'fixture' }));
+  const cmp = (incumbent: ProviderScorecard, challenger: ProviderScorecard): ProviderComparison => ({
+    contractVersion: EVAL_CONTRACT_VERSION, incumbent, challenger, decision: decidePromotion(incumbent, challenger),
+  });
+
+  const winnerRec = executor.buildRecommendation(cmp(fakeCard('fixture'), fakeCard('claude', { top1Accuracy: 0.8 })));
+  check('a statistically superior, REGISTERED challenger is recommended', winnerRec.recommend === true && winnerRec.verdict === 'PROMOTE_CHALLENGER');
+  check('the recommendation reports the ACTIVE provider — never switches it', winnerRec.activeProviderId === 'fixture');
+  check('evidence quotes V3.5 verbatim and adds the operational deltas', winnerRec.evidence.some((e) => e.includes('z=')) && winnerRec.evidence.some((e) => e.includes('top-1')) && winnerRec.evidence.some((e) => e.includes('ECE')));
+  check('a human checklist ships with it, reversion plan included', winnerRec.checklist.length >= 5 && winnerRec.checklist.some((c) => c.includes('VISION_PROVIDER=claude')) && winnerRec.checklist.some((c) => c.includes('reversión')));
+  check('impact names the calibration reset (auto-accept stops graduating on a new provider)', winnerRec.impact.some((i) => i.includes('calibración')));
+  check('…and that earned user trust survives a provider change (it lives in VisionFeedback)', winnerRec.impact.some((i) => i.includes('VisionFeedback')));
+
+  const unregistered = executor.buildRecommendation(cmp(fakeCard('fixture'), fakeCard('ghost', { top1Accuracy: 0.9 })));
+  check('an UNREGISTERED challenger is never recommended, however good its numbers', unregistered.recommend === false && unregistered.challengerRegistered === false && unregistered.risk === 'HIGH');
+  const keepRec = executor.buildRecommendation(cmp(fakeCard('fixture'), fakeCard('claude', { top1Accuracy: 0.71 })));
+  check('KEEP_INCUMBENT is not a recommendation to promote', keepRec.recommend === false && keepRec.explanation.includes('sigue siendo el proveedor correcto'));
+  const worseCal = executor.buildRecommendation(cmp(fakeCard('fixture'), fakeCard('claude', { top1Accuracy: 0.8, calibrationError: 0.3 })));
+  check('worse calibration raises risk even when promotion is statistically justified', worseCal.recommend === true && worseCal.risk === 'MEDIUM' && worseCal.riskFactors.some((r) => r.includes('calibrado')));
+  const costly = executor.buildRecommendation(cmp(fakeCard('fixture'), fakeCard('claude', { top1Accuracy: 0.8, meanTokensPerScan: 5000, meanLatencyMs: 9000 })));
+  check('cost and latency regressions surface as risk factors', costly.riskFactors.some((r) => r.includes('coste')) && costly.riskFactors.some((r) => r.includes('latencia')));
+  const drift = executor.buildRecommendation(cmp(fakeCard('claude'), fakeCard('gpt', { top1Accuracy: 0.8 })));
+  check('comparing an incumbent that is NOT what production runs is flagged HIGH risk', drift.risk === 'HIGH' && drift.riskFactors.some((r) => r.includes('no es el incumbente')));
+  check('promotion recommendation is deterministic', JSON.stringify(executor.buildRecommendation(cmp(fakeCard('fixture'), fakeCard('claude', { top1Accuracy: 0.8 })))) === JSON.stringify(winnerRec));
+
+  console.log('\n── V3.6: deriveUxMode — trust plugs into the V1 seam, degradation still wins ──');
+  check('pre-V3.6 callers are byte-identical (default param)', deriveUxMode('HIGH', null, 2) === 'CONFIRM' && deriveUxMode('MEDIUM', null, 2) === 'REVIEW' && deriveUxMode('LOW', null, 2) === 'FALLBACK');
+  check('autoAccepted -> AUTO_ACCEPT', deriveUxMode('HIGH', null, 2, true) === 'AUTO_ACCEPT');
+  check('NO amount of trust auto-accepts a degraded scan', deriveUxMode('HIGH', 'PROVIDER_ERROR', 2, true) === 'FALLBACK' && deriveUxMode('LOW', null, 2, true) === 'FALLBACK');
+
   // ── PART B: integration (embedded Postgres, precisely seeded, hand-computed) ──
   console.log('\n── V3.5: INTEGRATION (embedded Postgres — the four layers over real rows) ──');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-learning-'));
@@ -192,11 +313,46 @@ async function main() {
   await fb(b1.id, { action: 'ACCEPTED', proposedFoodItemId: pollo.id, confirmedFoodItemId: pollo.id, proposedGrams: 120, confirmedGrams: 120 });
   await fb(b2.id, { action: 'ACCEPTED', proposedFoodItemId: pollo.id, confirmedFoodItemId: pollo.id, proposedGrams: 120, confirmedGrams: 120 });
 
+  // V3.6 — the trust audit: append-only, queryable, explainable.
+  console.log('\n── V3.6: TRUST AUDIT (append-only; an auto-accept must stay explainable) ──');
+  const audit = new TrustAuditService(prisma);
+  const evidenceReader = new TrustEvidenceReader(prisma);
+  const trustFor = (over: Partial<TrustEvidence>) => computeTrust(ev({ ...over }), 0.9, 0.9, NOW);
+  await audit.record({
+    scanId: a1.id, userId: u1.id, providerId: 'alpha', modality: 'PHOTO', foodItemId: pollo.id, reportedConfidence: 0.9,
+    decision: decideAutoAccept({ trust: trustFor({ confirmations: 5, lastConfirmedAt: daysAgo(0) }), modality: 'PHOTO', calibratedConfidence: 0.9, fallbackReason: null, candidateCount: 1, allCandidatesGraduated: true, enabled: false }),
+  });
+  await audit.record({
+    scanId: a2.id, userId: u1.id, providerId: 'alpha', modality: 'PHOTO', foodItemId: arroz.id, reportedConfidence: 0.5,
+    decision: decideAutoAccept({ trust: trustFor({ confirmations: 1, lastConfirmedAt: daysAgo(0) }), modality: 'PHOTO', calibratedConfidence: 0.9, fallbackReason: null, candidateCount: 1, allCandidatesGraduated: true, enabled: false }),
+  });
+
+  const report = await audit.userTrustReport(u1.id);
+  check('graduated vs pending are separated per (food, modality)', report.graduated.length === 1 && report.pending.length === 1);
+  check('the graduated entry keeps its evidence and reason', (report.graduated[0] as any).trustLevel === 'HIGH' && !!(report.graduated[0] as any).lastReason);
+  check('shadow mode is visible: decided AUTO_ACCEPT, executed=false', (report.graduated[0] as any).executed === false && report.statistics.autoAccepted === 1 && report.statistics.actuallyExecuted === 0);
+  const auditRows = await audit.forScan(a1.id);
+  check('every persisted decision carries policy version, signals and reasons — explainable forever', auditRows[0].policyVersion === TRUST_POLICY_VERSION && auditRows[0].signals.length > 0 && auditRows[0].reasons.length > 0);
+  check('…and the calibrated confidence it actually used', auditRows[0].calibratedConfidence === 0.9 && auditRows[0].reportedConfidence === 0.9);
+  const stats = await audit.statistics(30);
+  check('platform statistics count what WOULD have been auto-accepted (rollout signal)', stats.totalDecisions === 2 && stats.shadowOnly === 1 && stats.executed === 0);
+  check('…broken down by action, level, modality and policy version', stats.byAction['AUTO_ACCEPT'] === 1 && stats.byTrustLevel['HIGH'] === 1 && stats.byModality['PHOTO'] === 2 && stats.byPolicyVersion['1'] === 2);
+
+  console.log('\n── V3.6: TRUST EVIDENCE READER (read-only; the user is the only supervisor) ──');
+  const polloEvidence = await evidenceReader.evidenceFor(u1.id, pollo.id, 'PHOTO');
+  check("reads the user's own confirmations of this food, from the V0 corpus", polloEvidence.confirmations === 4 && polloEvidence.corrections === 1, `${polloEvidence.confirmations}c/${polloEvidence.corrections}x`);
+  check('trust is PROVIDER-INDEPENDENT: alpha and beta confirmations both count — the user trusts the FOOD, not the vendor (this is why a provider swap keeps the moat)', polloEvidence.confirmations === 4);
+  check('…and the user total, which separates NEW_USER from UNKNOWN_FOOD', polloEvidence.userTotalConfirmations === 5);
+  check('a restaurant photo is its own modality — home trust does not transfer', (await evidenceReader.evidenceFor(u1.id, arroz.id, 'RESTAURANT')).confirmations === 0);
+  check('an unmatched (one-off) candidate can never accumulate trust', (await evidenceReader.evidenceFor(u1.id, null, 'PHOTO')).confirmations === 0);
+  check('an unknown user reads as no evidence, never a crash', (await evidenceReader.evidenceFor('00000000-0000-0000-0000-000000000000', pollo.id, 'PHOTO')).confirmations === 0);
+
   const countsBefore = {
     scans: await prisma.visionScan.count(),
     feedback: await prisma.visionFeedback.count(),
     foods: await prisma.foodItem.count(),
     meals: await prisma.loggedMeal.count(),
+    trust: await prisma.visionTrustDecision.count(),
   };
 
   const win = { from: W_FROM, to: W_TO };
@@ -259,6 +415,7 @@ async function main() {
     feedback: await prisma.visionFeedback.count(),
     foods: await prisma.foodItem.count(),
     meals: await prisma.loggedMeal.count(),
+    trust: await prisma.visionTrustDecision.count(),
   };
   check('a FULL evaluation pass (summary+scorecard+calibration+comparison+replay) changed ZERO rows', JSON.stringify(countsBefore) === JSON.stringify(countsAfter), JSON.stringify(countsAfter));
   const cardAgain = await engine.scorecard('alpha', win);

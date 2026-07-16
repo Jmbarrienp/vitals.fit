@@ -15,6 +15,9 @@ export const MODE_COPY: Record<ScanUxMode, { title: string; hint: string }> = {
   CONFIRM: { title: 'Esto detectamos', hint: 'Revisa y confirma para registrarlo.' },
   REVIEW: { title: 'Creemos que es esto', hint: 'No estamos seguros — ajusta lo que necesites antes de confirmar.' },
   FALLBACK: { title: 'No pudimos identificarlo bien', hint: 'Regístralo a mano; dejamos lo que alcanzamos a detectar.' },
+  // V3.6 — the platform had earned this and already logged it. The copy leads
+  // with what happened and keeps undo one tap away.
+  AUTO_ACCEPT: { title: 'Registrado automáticamente', hint: 'Ya lo conocemos de tus registros anteriores. Puedes deshacerlo.' },
 };
 
 export function bandCopy(band: ConfidenceBand) {

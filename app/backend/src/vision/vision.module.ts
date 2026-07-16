@@ -23,6 +23,10 @@ import { GroundTruthReader } from './learning/ground-truth.reader';
 import { ReplayEngine } from './learning/replay.engine';
 import { EvaluationEngine } from './learning/evaluation.engine';
 import { LearningController } from './learning/learning.controller';
+import { TrustEvidenceReader } from './learning/trust-evidence.reader';
+import { TrustEngine } from './learning/trust.engine';
+import { TrustAuditService } from './learning/trust-audit.service';
+import { PromotionExecutor } from './learning/promotion.executor';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -108,6 +112,17 @@ import { LearningController } from './learning/learning.controller';
     GroundTruthReader,
     ReplayEngine,
     EvaluationEngine,
+
+    // Runtime trust (V3.6) — the learning subsystem made actionable. The engine
+    // consumes V3.5's calibration and the user's own confirmations to decide
+    // whether the platform has EARNED the right to log without asking. Ships
+    // inert: AUTO_ACCEPT_ENABLED defaults to false (shadow mode — decide,
+    // persist and report, never act). PromotionExecutor recommends only; it has
+    // no path to switching a provider.
+    TrustEvidenceReader,
+    TrustAuditService,
+    TrustEngine,
+    PromotionExecutor,
   ],
   controllers: [VisionController, LearningController],
   exports: [VisionScanService],

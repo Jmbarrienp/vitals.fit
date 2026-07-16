@@ -9,6 +9,7 @@
 
 import { NutritionLabel } from './ocr-contract';
 import { RestaurantContext } from './restaurant-contract';
+import { AutoAcceptDecision } from '../learning/types/trust-contract';
 
 export const VISION_CONTRACT_VERSION = 1;
 
@@ -29,7 +30,8 @@ export type ScanStatus =
   | 'REJECTED'
   | 'EXPIRED'
   | 'FAILED'
-  | 'FALLBACK_MANUAL'; // user chose to log manually instead of confirming the proposal (V1)
+  | 'FALLBACK_MANUAL' // user chose to log manually instead of confirming the proposal (V1)
+  | 'UNDONE'; // V3.6: the platform auto-accepted and the user reverted it — the strongest ground truth there is
 
 export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'LOW';
 
@@ -38,8 +40,15 @@ export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'LOW';
  * POLICY lives here, not in mobile: HIGH -> a confident confirm CTA; MEDIUM ->
  * review with explicit uncertainty; FALLBACK -> steer to manual logging (low
  * confidence, no detections, or a provider failure). Mobile only renders it.
+ *
+ * V3.6 adds AUTO_ACCEPT: the platform had EARNED (per user, per food, per
+ * modality) the right to log without asking, and already did — the scan comes
+ * back LOGGED with an undo affordance. It is not a bypass of confirmation: the
+ * scan still traverses CONFIRMED -> LOGGED through confirmScan ->
+ * LogsService.logMeal, and undo is always available. Clients that predate this
+ * member degrade safely (mobile's modeCopy falls back to FALLBACK copy).
  */
-export type ScanUxMode = 'CONFIRM' | 'REVIEW' | 'FALLBACK';
+export type ScanUxMode = 'CONFIRM' | 'REVIEW' | 'FALLBACK' | 'AUTO_ACCEPT';
 
 export type PortionMethod =
   | 'REFERENCE_OBJECT'
@@ -178,6 +187,14 @@ export interface VisionScanProposal {
    * path. Absence = the fallback state (a normal photo scan).
    */
   restaurant?: RestaurantContext;
+  /**
+   * V3.6 — the runtime trust decision behind `mode`. Present on PHOTO/BARCODE/
+   * LABEL_OCR proposals once the trust engine runs. Additive: every existing
+   * consumer ignores it. `trust.executed === true` means the platform already
+   * logged this scan and the client should render an undo affordance rather
+   * than a confirm CTA.
+   */
+  trust?: AutoAcceptDecision;
 }
 
 /** What confirmation sends back. Deliberately isomorphic to LogMealDto.items. */

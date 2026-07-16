@@ -551,9 +551,10 @@ model VisionScan {
   confirmedAt DateTime?
   expiresAt   DateTime // PROPOSED scans past this are lazily swept to EXPIRED (no cron)
 
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  meal     LoggedMeal?
-  feedback VisionFeedback[]
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meal           LoggedMeal?
+  feedback       VisionFeedback[]
+  trustDecisions VisionTrustDecision[]
 
   @@index([userId, createdAt])
   @@index([status, expiresAt])
@@ -584,6 +585,46 @@ model VisionFeedback {
 
   @@index([scanId])
   @@index([userId, createdAt])
+  // V3.6 — the runtime trust query is "what has THIS user done with THIS food?".
+  @@index([userId, confirmedFoodItemId])
+}
+
+/**
+ * V3.6 — append-only audit of every runtime trust decision. An auto-accepted
+ * meal must stay explainable forever: which policy version, which evidence,
+ * which calibrated confidence, which provider, and whether it actually acted
+ * (false = shadow mode). Its own table rather than a Json blob because the
+ * admin surface QUERIES it: graduated foods, pending foods, trust statistics.
+ * Never updated, never deleted — an audit trail that can be rewritten is not one.
+ */
+model VisionTrustDecision {
+  id     String @id @default(uuid())
+  scanId String
+  userId String
+
+  policyVersion Int
+  action        String // 'MANUAL_REVIEW' | 'REVIEW_REQUIRED' | 'AUTO_ACCEPT' (String, never a PG enum — lesson 2B.1)
+  executed      Boolean @default(false) // false = decided but not acted on (shadow mode)
+
+  trustLevel            String // 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH'
+  trustScore            Float
+  calibratedConfidence  Float?
+  reportedConfidence    Float?
+
+  providerId String
+  modality   String // 'PHOTO' | 'BARCODE' | 'LABEL_OCR' | 'RESTAURANT'
+  foodItemId String? // the graduating key: trust is per (user, food, modality)
+
+  signals String[] // TrustSignal[] — why, in platform vocabulary
+  reasons String[] // why, in the user's language
+
+  createdAt DateTime @default(now())
+
+  scan VisionScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, foodItemId, modality])
+  @@index([action, createdAt])
 }
 
 // ─────────────────────────────────────────────

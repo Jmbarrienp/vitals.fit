@@ -19,6 +19,9 @@ import { PortionPriorInputs } from './pipeline/portion-engine';
 import { RestaurantMenuProviderRegistry } from './restaurant/restaurant-menu.registry';
 import { deriveRestaurantContext } from './pipeline/restaurant-context';
 import { MenuLookupResult, RestaurantContext } from './types/restaurant-contract';
+import { TrustEngine, modalityOf } from './learning/trust.engine';
+import { TrustAuditService } from './learning/trust-audit.service';
+import { AutoAcceptDecision } from './learning/types/trust-contract';
 import {
   VISION_EVENTS,
   VisionScanConfirmedEvent,
@@ -77,6 +80,8 @@ export class VisionScanService {
     private readonly ocrProviders: OCRProviderRegistry,
     private readonly priors: PortionPriorReader,
     private readonly menuProviders: RestaurantMenuProviderRegistry,
+    private readonly trust: TrustEngine,
+    private readonly audit: TrustAuditService,
   ) {}
 
   /**
@@ -221,7 +226,7 @@ export class VisionScanService {
         VISION_EVENTS.PROPOSED,
         new VisionScanProposedEvent(userId, scan.id, source, candidates.length, scanConfidence),
       );
-      return proposal;
+      return this.applyTrust(userId, proposal, result.providerId);
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'UNKNOWN_ERROR';
       await this.prisma.visionScan.update({
@@ -500,6 +505,103 @@ export class VisionScanService {
       fallback: { reason: scan.failureReason },
       contractVersion: VISION_CONTRACT_VERSION,
     };
+  }
+
+  /**
+   * V3.6 — the runtime trust step. Runs AFTER the scan is persisted as PROPOSED
+   * (so the auto-accept traverses the ordinary CONFIRMED -> LOGGED path through
+   * `confirmScan`, which its own guard requires) and BEFORE the caller sees the
+   * proposal.
+   *
+   * Auto-accept is not a bypass of confirmation: it is the platform performing
+   * the confirmation the user has already taught it, through the SAME
+   * `confirmScan` -> `LogsService.logMeal` path, with undo always available. The
+   * decision is recorded BEFORE it acts — nothing is auto-accepted without its
+   * reason already durable.
+   *
+   * Fails SOFT in every direction: any problem here returns the plain proposal,
+   * which is exactly the pre-V3.6 experience. Trust may only remove friction.
+   */
+  private async applyTrust(userId: string, proposal: VisionScanProposal, providerId: string): Promise<VisionScanProposal> {
+    let decision: AutoAcceptDecision;
+    try {
+      decision = await this.trust.decide(userId, proposal, providerId);
+    } catch {
+      return proposal; // no trust computed -> ask the user, as always
+    }
+
+    const primary = proposal.candidates[0];
+    await this.audit.record({
+      scanId: proposal.scanId,
+      userId,
+      decision,
+      providerId,
+      modality: modalityOf(proposal),
+      foodItemId: primary?.foodItemId ?? null,
+      reportedConfidence: primary?.confidence.overall ?? null,
+    });
+
+    if (!decision.executed) return { ...proposal, trust: decision };
+
+    try {
+      await this.confirmScan(userId, {
+        scanId: proposal.scanId,
+        mealType: proposal.suggestedMealType,
+        items: proposal.candidates.map((c) => ({
+          foodItemId: c.foodItemId,
+          quantity: c.portion.grams,
+          unit: 'g',
+          grams: c.portion.grams,
+          acceptedFromCandidate: c.detectionIndex,
+        })),
+      });
+      return { ...proposal, status: 'LOGGED', mode: 'AUTO_ACCEPT', trust: decision };
+    } catch {
+      // The auto-confirm failed; the scan is still PROPOSED and the user can
+      // confirm it themselves. Never strand a scan over an optimization.
+      return { ...proposal, trust: { ...decision, executed: false, undoWindowSeconds: 0 } };
+    }
+  }
+
+  /**
+   * V3.6 — the user reverts an auto-accepted meal. This is the strongest ground
+   * truth the platform can receive: it acted on its own and was told no.
+   *
+   * Deletes through `LogsService.deleteMeal` (the existing write path — Vision
+   * still never touches LoggedMeal itself), records an UNDONE example so the
+   * trust engine and the V3.5 learning corpus both see it, and marks the scan
+   * UNDONE. Undo is never ignored and never silently absorbed.
+   */
+  async undoScan(userId: string, scanId: string): Promise<void> {
+    const scan = await this.getOwnedScan(userId, scanId);
+    if (scan.status !== 'LOGGED') {
+      throw new BadRequestException(`Scan is ${scan.status}, cannot undo (must be LOGGED).`);
+    }
+
+    const meal = await this.prisma.loggedMeal.findFirst({ where: { visionScanId: scanId } });
+    if (meal) await this.logs.deleteMeal(userId, meal.id);
+
+    // The undo becomes ground truth: one UNDONE row per item the platform had
+    // logged, so trust drops for exactly the (user, food) pairs it got wrong.
+    const proposal = scan.proposal as unknown as VisionScanProposal | null;
+    const rows = (proposal?.candidates ?? []).map((c) => ({
+      scanId,
+      userId,
+      detectionIndex: c.detectionIndex,
+      proposedFoodItemId: c.foodItemId,
+      confirmedFoodItemId: c.foodItemId, // the trust key: what we wrongly logged
+      proposedGrams: c.portion.grams,
+      confirmedGrams: null,
+      proposedMethod: c.portion.method,
+      action: 'UNDONE',
+    }));
+    if (rows.length > 0) await this.prisma.visionFeedback.createMany({ data: rows });
+
+    await this.prisma.visionScan.update({
+      where: { id: scanId },
+      data: { status: 'UNDONE', failureReason: 'USER_UNDID_AUTO_ACCEPT' },
+    });
+    this.events.emit(VISION_EVENTS.FALLBACK, new VisionScanFallbackEvent(userId, scanId, scan.status));
   }
 
   /**

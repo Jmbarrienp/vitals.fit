@@ -7,9 +7,11 @@
 export type ScanSource = 'PHOTO' | 'BARCODE' | 'LABEL_OCR' | 'MENU_OCR' | 'RECEIPT_OCR' | 'VIDEO_FRAME';
 export type ScanStatus =
   | 'CREATED' | 'PROCESSING' | 'PROPOSED' | 'CONFIRMED' | 'LOGGED'
-  | 'REJECTED' | 'EXPIRED' | 'FAILED' | 'FALLBACK_MANUAL';
+  | 'REJECTED' | 'EXPIRED' | 'FAILED' | 'FALLBACK_MANUAL'
+  | 'UNDONE'; // V3.6 — an auto-accepted meal the user reverted
 export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'LOW';
-export type ScanUxMode = 'CONFIRM' | 'REVIEW' | 'FALLBACK';
+/** V3.6 adds AUTO_ACCEPT: the platform already logged it; render undo, not confirm. */
+export type ScanUxMode = 'CONFIRM' | 'REVIEW' | 'FALLBACK' | 'AUTO_ACCEPT';
 export type PortionMethod =
   | 'REFERENCE_OBJECT'
   | 'PLATE_RATIO'
@@ -97,6 +99,42 @@ export interface VisionScanProposal {
   label?: NutritionLabel;
   /** Present only when a PHOTO scan confidently detected a restaurant (V3.4). */
   restaurant?: RestaurantContext;
+  /**
+   * V3.6 — the backend's runtime trust decision. When `trust.executed` is true
+   * the meal is ALREADY logged (status LOGGED, mode AUTO_ACCEPT) and the client
+   * renders an undo affordance instead of a confirm CTA. The client never
+   * computes trust; it renders what the platform decided.
+   */
+  trust?: AutoAcceptDecision;
+}
+
+/** V3.6 — the backend's auto-accept decision. Mirrors trust-contract.ts; the client only renders it. */
+export type TrustLevel = 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH';
+export type AutoAcceptAction = 'MANUAL_REVIEW' | 'REVIEW_REQUIRED' | 'AUTO_ACCEPT';
+
+export interface AutoAcceptDecision {
+  policyVersion: number;
+  action: AutoAcceptAction;
+  undoWindowSeconds: number;
+  reason: string;
+  signals: string[];
+  trust: {
+    policyVersion: number;
+    level: TrustLevel;
+    score: number;
+    signals: string[];
+    reasons: string[];
+    evidence: {
+      confirmations: number;
+      corrections: number;
+      undos: number;
+      daysSinceLastConfirmation: number | null;
+      userTotalConfirmations: number;
+    };
+    calibratedConfidence: number | null;
+  };
+  /** true = the platform already logged this meal; render undo, not confirm. */
+  executed: boolean;
 }
 
 /** One dish a menu source knows (V3.4). Macros are PUBLISHED-or-null, never derived. */

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { NutritionStateService } from './nutrition-state.service';
-import { MealLoggedEvent } from '../orchestrator/events/meal.event';
+import { MealDeletedEvent, MealLoggedEvent } from '../orchestrator/events/meal.event';
 import { WeightUpdatedEvent } from '../orchestrator/events/progress.event';
 
 /**
@@ -14,6 +14,15 @@ export class NutritionStateListener {
 
   @OnEvent('meal.logged', { async: true, promisify: true })
   async onMealLogged(event: MealLoggedEvent): Promise<void> {
+    await this.state.markStale(event.userId);
+  }
+
+  /**
+   * A deleted meal changes the state exactly as much as a logged one (V3.6).
+   * Undo made this path frequent; the staleness gap it closes was always there.
+   */
+  @OnEvent('meal.deleted', { async: true, promisify: true })
+  async onMealDeleted(event: MealDeletedEvent): Promise<void> {
     await this.state.markStale(event.userId);
   }
 

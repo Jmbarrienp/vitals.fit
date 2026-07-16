@@ -41,4 +41,7 @@ export const visionApi = {
 
   // User chose manual logging instead — records the fallback (creates no meal).
   fallback: (id: string) => apiClient.post(`/vision/scans/${id}/fallback`),
+
+  /** V3.6: revert an auto-accepted meal. Deletes it and teaches the platform it was wrong. */
+  undo: (id: string) => apiClient.post(`/vision/scans/${id}/undo`),
 };

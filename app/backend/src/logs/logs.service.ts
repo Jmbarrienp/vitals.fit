@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LogMealDto, LogMealItemDto, MealType } from './dto/log-meal.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { MealLoggedEvent } from '../orchestrator/events/meal.event';
+import { MealDeletedEvent, MealLoggedEvent } from '../orchestrator/events/meal.event';
 
 /** Forma resuelta de un ítem, lista para persistir. Macros calculados en backend. */
 interface ResolvedItem {
@@ -143,6 +143,9 @@ export class LogsService {
       await tx.loggedMeal.delete({ where: { id: mealId } });
       await this.recalcDailyLog(tx, meal.dailyLogId);
     });
+    // Counterpart of meal.logged (V3.6) — without it, derived state keeps the
+    // calories of a meal that no longer exists until its TTL expires.
+    this.eventEmitter.emit('meal.deleted', new MealDeletedEvent(userId, mealId, new Date()));
     return this.getToday(userId);
   }
 
@@ -151,6 +154,7 @@ export class LogsService {
     const meal = await this.getOwnedMeal(userId, mealId);
     const item = meal.items.find((i) => i.id === itemId);
     if (!item) throw new NotFoundException('Ítem no encontrado.');
+    const mealDisappears = meal.items.length === 1;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.loggedMealItem.delete({ where: { id: itemId } });
@@ -181,6 +185,10 @@ export class LogsService {
       await this.recalcDailyLog(tx, meal.dailyLogId);
     });
 
+    // Removing the last item deletes the meal — same event as an explicit delete.
+    if (mealDisappears) {
+      this.eventEmitter.emit('meal.deleted', new MealDeletedEvent(userId, mealId, new Date()));
+    }
     return this.getToday(userId);
   }
 

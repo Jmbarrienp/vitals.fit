@@ -5,7 +5,16 @@ import { visionApi } from '../api/vision';
 import type { ScanConfirmationItem, VisionScanProposal } from '../types/vision';
 
 /** Explicit capture state machine — testable transitions, no nutrition logic. */
-export type CaptureState = 'idle' | 'capturing' | 'proposing' | 'proposed' | 'confirming' | 'done' | 'error';
+export type CaptureState =
+  | 'idle'
+  | 'capturing'
+  | 'proposing'
+  | 'proposed'
+  | 'confirming'
+  | 'done'
+  | 'error'
+  /** V3.6 — the backend already logged it (earned trust). Undo is one tap away. */
+  | 'auto_accepted';
 
 /**
  * Orchestrates the V1 capture flow: launch camera -> submit to Vision ->
@@ -24,6 +33,13 @@ export function useVisionCapture() {
     setProposal(null);
     setError(null);
   }, []);
+
+  /** Same invalidations as manual logging — today's totals, food lists, intelligence. */
+  const invalidate = useCallback(() => {
+    ['today', 'food-recent', 'food-frequent', 'intelligence'].forEach((k) =>
+      queryClient.invalidateQueries({ queryKey: [k] }),
+    );
+  }, [queryClient]);
 
   /** Launch the camera, then submit to the Vision pipeline. Returns the proposal (or null on abort/failure). */
   const capture = useCallback(async (): Promise<VisionScanProposal | null> => {
@@ -55,7 +71,14 @@ export function useVisionCapture() {
       const image = asset.base64 ? { base64: asset.base64, mimeType: 'image/jpeg' as const } : undefined;
       const res = await visionApi.createScan(imageRef, 'PHOTO', image);
       setProposal(res.data);
-      setState('proposed');
+      // V3.6: the backend may have already logged this on the user's earned
+      // trust. It decided and acted; the client reflects that and offers undo.
+      if (res.data.trust?.executed) {
+        invalidate();
+        setState('auto_accepted');
+      } else {
+        setState('proposed');
+      }
       return res.data;
     } catch (e) {
       setState('error');
@@ -70,18 +93,32 @@ export function useVisionCapture() {
       setState('confirming');
       try {
         await visionApi.confirm(proposal.scanId, items, mealType);
-        // Same invalidations as manual logging — today's totals, food lists, intelligence.
-        ['today', 'food-recent', 'food-frequent', 'intelligence'].forEach((k) =>
-          queryClient.invalidateQueries({ queryKey: [k] }),
-        );
+        invalidate();
         setState('done');
       } catch (e) {
         setState('error');
         setError('CONFIRM_FAILED');
       }
     },
-    [proposal, queryClient],
+    [proposal, invalidate],
   );
+
+  /**
+   * V3.6 — revert an auto-accepted meal. The backend deletes it through
+   * LogsService and records the undo as ground truth, so this exact food stops
+   * auto-accepting until trust is re-earned.
+   */
+  const undo = useCallback(async () => {
+    if (!proposal) return;
+    try {
+      await visionApi.undo(proposal.scanId);
+      invalidate();
+      reset();
+    } catch (e) {
+      setState('error');
+      setError('UNDO_FAILED');
+    }
+  }, [proposal, invalidate, reset]);
 
   const reject = useCallback(async () => {
     if (proposal) await visionApi.reject(proposal.scanId).catch(() => undefined);
@@ -94,5 +131,5 @@ export function useVisionCapture() {
     reset();
   }, [proposal, reset]);
 
-  return { state, proposal, error, capture, confirm, reject, fallbackToManual, reset };
+  return { state, proposal, error, capture, confirm, reject, fallbackToManual, undo, reset };
 }

@@ -15,7 +15,7 @@ import type { FoodCandidate, MenuCandidate, RestaurantContext, ScanConfirmationI
  */
 export default function ScanScreen() {
   const router = useRouter();
-  const { state, proposal, error, capture, confirm, reject, fallbackToManual } = useVisionCapture();
+  const { state, proposal, error, capture, confirm, reject, fallbackToManual, undo } = useVisionCapture();
   const [included, setIncluded] = useState<Set<number>>(new Set());
   // V3.4 — menu candidates the user tapped (indices into restaurant.menuCandidates).
   const [menuPicked, setMenuPicked] = useState<Set<number>>(new Set());
@@ -105,6 +105,10 @@ export default function ScanScreen() {
           </Card>
         )}
 
+        {state === 'auto_accepted' && proposal && (
+          <AutoAccepted proposal={proposal} onUndo={undo} onDone={() => router.replace('/(tabs)/log')} />
+        )}
+
         {state === 'proposed' && proposal && (
           <>
             {proposal.restaurant && (
@@ -137,6 +141,43 @@ export default function ScanScreen() {
         )}
       </View>
     </ScrollView>
+  );
+}
+
+/**
+ * V3.6 — the platform had earned this and already logged it. Lead with what
+ * happened, say WHY in the user's own terms (the backend's deterministic
+ * reason), and keep undo one tap away. Undo is not a hidden escape hatch: it is
+ * how the user corrects a platform that acted on its own.
+ */
+function AutoAccepted({
+  proposal, onUndo, onDone,
+}: {
+  proposal: NonNullable<ReturnType<typeof useVisionCapture>['proposal']>;
+  onUndo: () => void;
+  onDone: () => void;
+}) {
+  const mode = modeCopy('AUTO_ACCEPT');
+  return (
+    <>
+      <Card>
+        <Text className="text-text-primary text-base font-semibold mb-1">✓ {mode.title}</Text>
+        <Text className="text-text-muted text-xs mb-3">{proposal.trust?.reason ?? mode.hint}</Text>
+        {proposal.candidates.map((c) => (
+          <View key={c.detectionIndex} className="flex-row items-center py-2.5 border-b border-border">
+            <View className="w-6"><Text className="text-lg text-text-muted">•</Text></View>
+            <View className="flex-1">
+              <Text className="text-text-primary text-sm">{c.displayName}</Text>
+              <Text className="text-text-muted text-[10px]">{`~${c.portion.grams}g${portionHint(c)}`}</Text>
+            </View>
+          </View>
+        ))}
+      </Card>
+      <View className="mt-4 gap-2">
+        <Button label="Deshacer" variant="outline" onPress={onUndo} />
+        <Button label="Listo" onPress={onDone} />
+      </View>
+    </>
   );
 }
 

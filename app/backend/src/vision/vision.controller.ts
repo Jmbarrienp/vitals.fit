@@ -84,4 +84,14 @@ export class VisionController {
   fallback(@Request() req: { user: { id: string } }, @Param('id') id: string) {
     return this.scans.markFallbackManual(req.user.id, id);
   }
+
+  /**
+   * The user reverts an auto-accepted meal (V3.6). Deletes through LogsService
+   * and records the undo as ground truth — the platform acted on its own and
+   * was told no, which is the strongest signal it can receive.
+   */
+  @Post(':id/undo')
+  undo(@Request() req: { user: { id: string } }, @Param('id') id: string) {
+    return this.scans.undoScan(req.user.id, id);
+  }
 }

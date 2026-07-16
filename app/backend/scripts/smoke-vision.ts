@@ -83,6 +83,12 @@ import { deriveRestaurantContext } from '../src/vision/pipeline/restaurant-conte
 import { RestaurantMenuProviderRegistry } from '../src/vision/restaurant/restaurant-menu.registry';
 import { NullRestaurantMenuProvider } from '../src/vision/restaurant/null-restaurant-menu.provider';
 import { FixtureRestaurantMenuProvider } from '../src/vision/restaurant/fixture-restaurant-menu.provider';
+import { TrustEvidenceReader } from '../src/vision/learning/trust-evidence.reader';
+import { TrustAuditService } from '../src/vision/learning/trust-audit.service';
+import { TrustEngine } from '../src/vision/learning/trust.engine';
+import { EvaluationEngine } from '../src/vision/learning/evaluation.engine';
+import { GroundTruthReader } from '../src/vision/learning/ground-truth.reader';
+import { ReplayEngine } from '../src/vision/learning/replay.engine';
 import { median, mad, selectPrior, computeBias, historyWeight } from '../src/vision/pipeline/portion-priors';
 import { PortionPriorReader } from '../src/vision/priors/portion-prior.reader';
 import { inferMealType } from '../src/vision/pipeline/build-candidates';
@@ -514,7 +520,12 @@ async function main() {
   // Fixture menu source for the main service — the restaurant flow is exercised
   // end-to-end; the production default ('none') gets its own dedicated test.
   const menuRegistry = new RestaurantMenuProviderRegistry(new ConfigService({ RESTAURANT_MENU_PROVIDER: 'fixture' }), [new NullRestaurantMenuProvider(), new FixtureRestaurantMenuProvider()]);
-  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry);
+  // V3.6 — trust runs with AUTO_ACCEPT_ENABLED unset (shadow mode), which is the
+  // production default: every V0–V3.5 assertion below must be unchanged by it.
+  const evidenceReader = new TrustEvidenceReader(prisma);
+  const trustAudit = new TrustAuditService(prisma);
+  const trustEngine = new TrustEngine(evidenceReader, new EvaluationEngine(new GroundTruthReader(prisma), new ReplayEngine(prisma, foodSvc)), new ConfigService({}));
+  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
 
   const user = await prisma.user.create({ data: { email: 'vision@test.local' } });
   await prisma.goal.create({ data: { userId: user.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
@@ -590,7 +601,7 @@ async function main() {
 
   // ── provider failure -> FAILED, never a broken scan, manual fallback signaled ──
   const failRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'nonexistent' }), [new FixtureVisionProvider()]);
-  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry);
+  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
   const failedProposal = await failVisionSvc.createScan(user.id, 'anything.jpg', 'PHOTO');
   check('unknown provider -> scan FAILED, not thrown to the caller', failedProposal.status === 'FAILED' && failedProposal.fallback.reason === 'PROVIDER_ERROR');
   const failedScanRow = await prisma.visionScan.findUnique({ where: { id: failedProposal.scanId } });
@@ -604,7 +615,7 @@ async function main() {
     async recognize() { return { providerId: 'bad', detections: 'not-an-array' } as any; },
   };
   const badRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'bad' }), [badProvider]);
-  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry);
+  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
   const badProposal = await badSvc.createScan(user.id, 'chicken.jpg', 'PHOTO');
   check('malformed provider response -> scan FAILED (validation gate, fail-safe)', badProposal.status === 'FAILED');
   const badRow = await prisma.visionScan.findUnique({ where: { id: badProposal.scanId } });
@@ -684,11 +695,11 @@ async function main() {
   console.log('\n── V3.1: PROVIDER FAILURE / OFFLINE (network error, not "not found") ──');
   const throwingBarcodeProvider = { id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } };
   const throwingRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'throws' }), [throwingBarcodeProvider]);
-  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry, priorReader, menuRegistry);
+  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
   const throwScan = await throwingSvc.createBarcodeScan(user.id, '2223334445556');
   check('a real lookup failure (offline/timeout) is distinct from not-found — scan FAILED, same degradation contract as vision', throwScan.status === 'FAILED' && throwScan.fallback.reason === 'PROVIDER_ERROR' && throwScan.mode === 'FALLBACK');
   const unknownBarcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'ghost-barcode' }), [barcodeFixture]);
-  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry, priorReader, menuRegistry);
+  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
   const unknownScan = await unknownBarcodeSvc.createBarcodeScan(user.id, '3334445556667');
   check('a misconfigured provider id fails the scan gracefully, never throws to the caller', unknownScan.status === 'FAILED' && unknownScan.mode === 'FALLBACK');
 
@@ -738,7 +749,7 @@ async function main() {
   const unreadableScan = await visionSvc.createLabelScan(user.id, 'unreadable-label.jpg');
   check('an unreadable label degrades to manual (serving 0 cannot be logged)', unreadableScan.status === 'FAILED' && unreadableScan.mode === 'FALLBACK');
   const throwingOcrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'throws' }), [{ id: 'throws', async extract() { throw new Error('NETWORK_TIMEOUT'); } }]);
-  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry, priorReader, menuRegistry);
+  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
   const ocrFailScan = await throwingOcrSvc.createLabelScan(user.id, 'us-label.jpg');
   check('an OCR provider failure degrades to manual, never throws to the caller', ocrFailScan.status === 'FAILED' && ocrFailScan.fallback.reason === 'PROVIDER_ERROR');
 
@@ -886,6 +897,94 @@ async function main() {
   const restScanAgain = await visionSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
   check('determinism: same image ref -> identical restaurant context', JSON.stringify(restScanAgain.restaurant) === JSON.stringify(restScan.restaurant));
 
+  console.log('\n── V3.6: THE GRADUATION JOURNEY (confirm -> review -> the platform accepts) ──');
+  // AUTO_ACCEPT_ENABLED=true — the ONLY difference from the production default.
+  const liveTrust = new TrustEngine(evidenceReader, new EvaluationEngine(new GroundTruthReader(prisma), new ReplayEngine(prisma, foodSvc)), new ConfigService({ AUTO_ACCEPT_ENABLED: 'true' }));
+  const liveSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, liveTrust, trustAudit);
+  // TWO INDEPENDENT GATES, and this seeding makes the distinction concrete:
+  //   · CALIBRATION is per PROVIDER and platform-wide — "does this provider's
+  //     0.8 really mean 0.8?" is answered by everyone's traffic, not one user's.
+  //   · TRUST is per (user, food, modality) — "has THIS user taught us THIS?".
+  // A provider with no calibration evidence can never auto-accept for anyone,
+  // however much any single user has confirmed. So: another user's traffic
+  // calibrates the provider first, exactly as production would.
+  const calibrator = await prisma.user.create({ data: { email: 'vision-calibrator@test.local' } });
+  await prisma.goal.create({ data: { userId: calibrator.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
+  for (let i = 0; i < 10; i++) {
+    const p = await visionSvc.createScan(calibrator.id, 'photo-chicken-plate.jpg', 'PHOTO');
+    if (p.status === 'PROPOSED') await confirmAll2(visionSvc, calibrator.id, p);
+  }
+  const calHealth = await new EvaluationEngine(new GroundTruthReader(prisma), new ReplayEngine(prisma, foodSvc)).calibration('fixture', { days: 90 });
+  check('another user\'s traffic calibrated the PROVIDER (platform-wide gate, independent of any user\'s trust)', calHealth.curve.builtFrom.examples > 0 && calHealth.curve.bins.some((b: any) => b.n >= 5));
+
+  const grad = await prisma.user.create({ data: { email: 'vision-graduate@test.local' } });
+  await prisma.goal.create({ data: { userId: grad.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
+
+  // Scan 1 — a brand-new user. Trust is never granted.
+  const g1 = await liveSvc.createScan(grad.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  check('1st scan: a new user is asked to confirm — trust is EARNED, never granted', g1.status === 'PROPOSED' && g1.trust?.action !== 'AUTO_ACCEPT' && g1.trust?.trust.level === 'NONE');
+  check('…and the decision is already explainable (signals name the context)', !!g1.trust?.signals.includes('NEW_USER') && !!g1.trust?.signals.includes('UNKNOWN_FOOD'));
+  const g1Audit = await prisma.visionTrustDecision.findFirst({ where: { scanId: g1.scanId } });
+  check('…and persisted for audit from the very first scan', g1Audit?.action === 'REVIEW_REQUIRED' && g1Audit?.policyVersion === 1);
+
+  // Confirm the same plate five times. Each confirmation is ground truth.
+  const confirmAll = async (p: any) => liveSvc.confirmScan(grad.id, {
+    scanId: p.scanId, mealType: 'LUNCH',
+    items: p.candidates.map((c: any) => ({ foodItemId: c.foodItemId, quantity: c.portion.grams, unit: 'g', grams: c.portion.grams, acceptedFromCandidate: c.detectionIndex })),
+  });
+  await confirmAll(g1);
+  let gN: any = g1;
+  for (let i = 0; i < 4; i++) {
+    gN = await liveSvc.createScan(grad.id, 'photo-chicken-plate.jpg', 'PHOTO');
+    if (gN.status === 'PROPOSED') await confirmAll(gN);
+  }
+  check('scans 2-5 kept asking while evidence accumulated (no premature graduation)', gN.status === 'PROPOSED');
+
+  // Scan 6 — five clean confirmations of every food on the plate are now on record.
+  const g6 = await liveSvc.createScan(grad.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  check('AFTER 5 confirmations the platform accepts automatically — the goal, met', g6.status === 'LOGGED' && g6.mode === 'AUTO_ACCEPT' && g6.trust?.executed === true, `${g6.mode}/${g6.status}`);
+  check('…with an undo window and a reason the user can read', g6.trust?.undoWindowSeconds === 900 && !!g6.trust?.reason.includes('confirmaciones'));
+  check('…and it went through the SAME write path (source=vision, scan-linked)', (await prisma.loggedMeal.findFirst({ where: { visionScanId: g6.scanId } }))?.source === 'vision');
+  check('…and every candidate on the plate had to be graduated', g6.trust?.trust.level === 'HIGH' && g6.candidates.length === 3);
+  check('meal.logged still fired — auto-accept is not a bypass, it is the same confirmation', mealLoggedFired === true);
+  const g6Audit = await prisma.visionTrustDecision.findFirst({ where: { scanId: g6.scanId } });
+  check('the auto-accept is explainable forever: policy, evidence, calibration, provider', g6Audit?.action === 'AUTO_ACCEPT' && g6Audit?.executed === true && g6Audit?.trustLevel === 'HIGH' && g6Audit?.providerId === 'fixture' && (g6Audit?.calibratedConfidence ?? 0) > 0);
+
+  console.log('\n── V3.6: UNDO (the strongest ground truth: the platform acted and was told no) ──');
+  const beforeUndo = await prisma.loggedMeal.count({ where: { dailyLog: { userId: grad.id } } });
+  await liveSvc.undoScan(grad.id, g6.scanId);
+  check('undo DELETES the meal through LogsService (Vision never touches LoggedMeal)', (await prisma.loggedMeal.count({ where: { dailyLog: { userId: grad.id } } })) === beforeUndo - 1);
+  check('the scan is marked UNDONE with a specific reason', (await prisma.visionScan.findUnique({ where: { id: g6.scanId } }))?.status === 'UNDONE');
+  const undoFeedback = await prisma.visionFeedback.findMany({ where: { scanId: g6.scanId, action: 'UNDONE' } });
+  check('undo becomes GROUND TRUTH: one UNDONE example per item the platform logged', undoFeedback.length === 3);
+  check('undo is never ignored — it enters the same corpus V3.5 learns from', undoFeedback.every((f: any) => f.confirmedFoodItemId !== null));
+
+  // The very next scan must NOT auto-accept: the undo is catastrophic and immediate.
+  const g7 = await liveSvc.createScan(grad.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  check('after an undo the platform IMMEDIATELY stops auto-accepting — no permanent trust', g7.status === 'PROPOSED' && g7.trust?.executed === false && g7.trust?.trust.level === 'NONE');
+  check('…and it says exactly why, in the user\'s language', !!g7.trust?.trust.signals.includes('RECENT_UNDO') && !!g7.trust?.reason.includes('deshiciste'));
+  let undoTwiceThrew = false;
+  try { await liveSvc.undoScan(grad.id, g6.scanId); } catch { undoTwiceThrew = true; }
+  check('undoing twice is refused (the scan is no longer LOGGED)', undoTwiceThrew === true);
+
+  console.log('\n── V3.6: SHADOW MODE (the production default: decide, persist, never act) ──');
+  const shadowUser = await prisma.user.create({ data: { email: 'vision-shadow@test.local' } });
+  await prisma.goal.create({ data: { userId: shadowUser.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
+  for (let i = 0; i < 5; i++) {
+    const p = await liveSvc.createScan(shadowUser.id, 'photo-chicken-plate.jpg', 'PHOTO');
+    if (p.status === 'PROPOSED') await confirmAll2(liveSvc, shadowUser.id, p);
+  }
+  // Same user, same earned evidence, same calibration — the ONLY variable is the
+  // flag. (A fresh engine, because TrustEngine caches calibration curves for 10
+  // minutes; reusing a long-lived one would test the cache, not the policy.)
+  const shadowTrust = new TrustEngine(evidenceReader, new EvaluationEngine(new GroundTruthReader(prisma), new ReplayEngine(prisma, foodSvc)), new ConfigService({}));
+  const shadowSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, shadowTrust, trustAudit);
+  const shadowScan = await shadowSvc.createScan(shadowUser.id, 'photo-chicken-plate.jpg', 'PHOTO');
+  check('with AUTO_ACCEPT_ENABLED unset the platform still DECIDES auto-accept…', shadowScan.trust?.action === 'AUTO_ACCEPT' && shadowScan.trust?.trust.level === 'HIGH');
+  check('…but never acts: status stays PROPOSED, the user still confirms', shadowScan.status === 'PROPOSED' && shadowScan.trust?.executed === false && shadowScan.mode !== 'AUTO_ACCEPT');
+  check('…and the shadow decision is persisted, so the rollout can be measured before it is enabled', (await prisma.visionTrustDecision.findFirst({ where: { scanId: shadowScan.scanId } }))?.executed === false);
+  check('shadow reason states it plainly', !!shadowScan.trust?.reason.includes('modo sombra'));
+
   console.log('\n── NO-BYPASS INVARIANT ──');
   const visionMeals = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, source: 'vision' } });
   const nonVisionScanRows = await prisma.loggedMeal.count({ where: { dailyLog: { userId: user.id }, visionScanId: null, source: 'vision' } });
@@ -906,8 +1005,23 @@ async function main() {
   try { await pg.stop(); } catch { /* teardown */ }
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 
-  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1+V3.2+V3.3+V3.4`);
+  console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Nutrition Vision V0+V1+V2+V3.1+V3.2+V3.3+V3.4+V3.6`);
   process.exit(failures === 0 ? 0 : 1);
+}
+
+/** Confirm every candidate of a proposal for a given user — the graduation loop's ground truth. */
+async function confirmAll2(svc: any, userId: string, p: any) {
+  return svc.confirmScan(userId, {
+    scanId: p.scanId,
+    mealType: 'LUNCH',
+    items: p.candidates.map((c: any) => ({
+      foodItemId: c.foodItemId,
+      quantity: c.portion.grams,
+      unit: 'g',
+      grams: c.portion.grams,
+      acceptedFromCandidate: c.detectionIndex,
+    })),
+  });
 }
 
 main().catch((e) => {

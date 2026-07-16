@@ -26,9 +26,22 @@ export function bandFor(overall: number): ConfidenceBand {
  * A degraded scan (no detections / provider failure) or LOW confidence steers to
  * manual logging; MEDIUM shows the proposal with uncertainty; HIGH is a confident
  * confirm. Friction can only go down — FALLBACK never blocks, it prefills.
+ *
+ * V3.6 — `autoAccepted` is the ONE new input: when the trust engine actually
+ * executed an auto-accept, the mode says so. Additive and optional, so every
+ * pre-V3.6 caller keeps its exact behavior. Note the ORDER: degradation and a
+ * LOW band still win first, so no amount of earned trust can auto-accept a scan
+ * the platform itself isn't confident in. Trust plugs into the seam V1 built
+ * rather than growing a second, parallel decision path.
  */
-export function deriveUxMode(band: ConfidenceBand, fallbackReason: string | null, candidateCount: number): ScanUxMode {
+export function deriveUxMode(
+  band: ConfidenceBand,
+  fallbackReason: string | null,
+  candidateCount: number,
+  autoAccepted = false,
+): ScanUxMode {
   if (fallbackReason !== null || candidateCount === 0 || band === 'LOW') return 'FALLBACK';
+  if (autoAccepted) return 'AUTO_ACCEPT';
   if (band === 'MEDIUM') return 'REVIEW';
   return 'CONFIRM';
 }
