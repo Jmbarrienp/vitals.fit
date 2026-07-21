@@ -20,6 +20,7 @@ import { RestaurantMenuProviderRegistry } from './restaurant/restaurant-menu.reg
 import { deriveRestaurantContext } from './pipeline/restaurant-context';
 import { MenuLookupResult, RestaurantContext } from './types/restaurant-contract';
 import { TrustEngine, modalityOf } from './learning/trust.engine';
+import { ShadowEvaluationRunner } from './governance/shadow-evaluation.runner';
 import { TrustAuditService } from './learning/trust-audit.service';
 import { AutoAcceptDecision } from './learning/types/trust-contract';
 import {
@@ -82,6 +83,7 @@ export class VisionScanService {
     private readonly menuProviders: RestaurantMenuProviderRegistry,
     private readonly trust: TrustEngine,
     private readonly audit: TrustAuditService,
+    private readonly shadow: ShadowEvaluationRunner,
   ) {}
 
   /**
@@ -226,6 +228,24 @@ export class VisionScanService {
         VISION_EVENTS.PROPOSED,
         new VisionScanProposedEvent(userId, scan.id, source, candidates.length, scanConfidence),
       );
+
+      // V4.1 — shadow governance. `capture` is in-memory only (it exists solely
+      // to take the pixels before this method's `finally` frees them); the
+      // challenger call itself is fire-and-forget and can never affect what the
+      // user gets back. Production still runs exactly ONE provider: nothing
+      // below reads the shadow result, and no vote is ever taken.
+      //
+      // Wrapped even though `capture` already swallows its own errors: this is
+      // the boundary where "shadow must never affect the user-facing result"
+      // is ENFORCED rather than trusted. A programming error in governance —
+      // not just a provider failure — must cost the evidence, never the scan.
+      try {
+        const ticket = await this.shadow.capture(scan.id, ref, source);
+        if (ticket) void this.shadow.run(scan.id, userId, ticket);
+      } catch {
+        /* governance is strictly optional; the user's scan is not */
+      }
+
       return this.applyTrust(userId, proposal, result.providerId);
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'UNKNOWN_ERROR';

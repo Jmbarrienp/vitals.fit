@@ -30,6 +30,11 @@ import { PromotionExecutor } from './learning/promotion.executor';
 import { RolloutDataReader } from './rollout/rollout-data.reader';
 import { RolloutEngine } from './rollout/rollout.engine';
 import { RolloutController } from './rollout/rollout.controller';
+import { ShadowEvaluationRunner } from './governance/shadow-evaluation.runner';
+import { GovernanceEngine } from './governance/governance.engine';
+import { GovernanceController } from './governance/governance.controller';
+import { PromotionExecutorEngine } from './promotion/promotion-executor.engine';
+import { PromotionController } from './promotion/promotion.controller';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -132,8 +137,22 @@ import { RolloutController } from './rollout/rollout.controller';
     // the owners above; has no write access and no path to any flag.
     RolloutDataReader,
     RolloutEngine,
+
+    // Provider governance (V4.1) — PAIRED comparison on identical inputs. The
+    // shadow runner is the subsystem's only writer (append-only evidence); the
+    // engine is read-only and cannot promote anything. Ships inert: shadow runs
+    // require BOTH a configured challenger and a sample rate above zero.
+    // Production still runs exactly ONE provider — no ensembles, no voting.
+    ShadowEvaluationRunner,
+    GovernanceEngine,
+
+    // Promotion Executor (V4.2) — a PURE CONSUMER. Turns the owners' verdicts
+    // (Governance recommendation + Rollout risk/gates/health/status) into an
+    // auditable execution plan. Recomputes no statistic, writes nothing,
+    // executes nothing — it builds a document a human acts on.
+    PromotionExecutorEngine,
   ],
-  controllers: [VisionController, LearningController, RolloutController],
+  controllers: [VisionController, LearningController, RolloutController, GovernanceController, PromotionController],
   exports: [VisionScanService],
 })
 export class VisionModule {}

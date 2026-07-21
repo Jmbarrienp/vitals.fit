@@ -555,6 +555,7 @@ model VisionScan {
   meal           LoggedMeal?
   feedback       VisionFeedback[]
   trustDecisions VisionTrustDecision[]
+  shadowRuns     VisionShadowRun[]
 
   @@index([userId, createdAt])
   @@index([status, expiresAt])
@@ -625,6 +626,44 @@ model VisionTrustDecision {
   @@index([userId, createdAt])
   @@index([userId, foodItemId, modality])
   @@index([action, createdAt])
+}
+
+/**
+ * V4.1 — append-only evidence from one CHALLENGER provider run against a real
+ * scan, in shadow. Never reaches the user, never votes, never enters the write
+ * path: it exists so the platform can score two providers on the SAME input
+ * against the SAME user confirmation (V3.5's comparison used each provider's
+ * own traffic, which confounds provider quality with traffic mix).
+ *
+ * `@@unique([scanId, providerId])` makes shadow ingestion idempotent — one
+ * verdict per (scan, provider), so a retry can never inflate the evidence.
+ * Rows are written once and never updated.
+ */
+model VisionShadowRun {
+  id     String @id @default(uuid())
+  scanId String
+  userId String
+
+  providerId      String
+  providerModel   String?
+  providerVersion String?
+  source          String // ScanSource of the originating scan
+
+  status        String // 'COMPLETED' | 'FAILED'
+  failureReason String?
+
+  detections Json? // the challenger's platform-shaped detections; NEVER a raw vendor payload
+  latencyMs  Float?
+  tokensIn   Int?
+  tokensOut  Int?
+
+  createdAt DateTime @default(now())
+
+  scan VisionScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, providerId])
+  @@index([providerId, createdAt])
+  @@index([createdAt])
 }
 
 // ─────────────────────────────────────────────

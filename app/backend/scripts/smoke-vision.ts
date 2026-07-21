@@ -89,6 +89,7 @@ import { TrustEngine } from '../src/vision/learning/trust.engine';
 import { EvaluationEngine } from '../src/vision/learning/evaluation.engine';
 import { GroundTruthReader } from '../src/vision/learning/ground-truth.reader';
 import { ReplayEngine } from '../src/vision/learning/replay.engine';
+import { ShadowEvaluationRunner } from '../src/vision/governance/shadow-evaluation.runner';
 import { median, mad, selectPrior, computeBias, historyWeight } from '../src/vision/pipeline/portion-priors';
 import { PortionPriorReader } from '../src/vision/priors/portion-prior.reader';
 import { inferMealType } from '../src/vision/pipeline/build-candidates';
@@ -524,8 +525,11 @@ async function main() {
   // production default: every V0–V3.5 assertion below must be unchanged by it.
   const evidenceReader = new TrustEvidenceReader(prisma);
   const trustAudit = new TrustAuditService(prisma);
+  // V4.1 — shadow governance with NO challenger configured (the production
+  // default). Every V0–V3.6 assertion below must be unchanged by its presence.
+  const shadowRunner = new ShadowEvaluationRunner(prisma, registry, imageStore, new ConfigService({}));
   const trustEngine = new TrustEngine(evidenceReader, new EvaluationEngine(new GroundTruthReader(prisma), new ReplayEngine(prisma, foodSvc)), new ConfigService({}));
-  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
+  const visionSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit, shadowRunner);
 
   const user = await prisma.user.create({ data: { email: 'vision@test.local' } });
   await prisma.goal.create({ data: { userId: user.id, type: 'MAINTAIN', targetCalories: 2200, proteinG: 150, carbsG: 250, fatG: 70, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: 0 } });
@@ -601,7 +605,7 @@ async function main() {
 
   // ── provider failure -> FAILED, never a broken scan, manual fallback signaled ──
   const failRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'nonexistent' }), [new FixtureVisionProvider()]);
-  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
+  const failVisionSvc = new VisionScanService(prisma, foodSvc, logsSvc, failRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit, shadowRunner);
   const failedProposal = await failVisionSvc.createScan(user.id, 'anything.jpg', 'PHOTO');
   check('unknown provider -> scan FAILED, not thrown to the caller', failedProposal.status === 'FAILED' && failedProposal.fallback.reason === 'PROVIDER_ERROR');
   const failedScanRow = await prisma.visionScan.findUnique({ where: { id: failedProposal.scanId } });
@@ -615,7 +619,7 @@ async function main() {
     async recognize() { return { providerId: 'bad', detections: 'not-an-array' } as any; },
   };
   const badRegistry = new VisionProviderRegistry(new ConfigService({ VISION_PROVIDER: 'bad' }), [badProvider]);
-  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
+  const badSvc = new VisionScanService(prisma, foodSvc, logsSvc, badRegistry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit, shadowRunner);
   const badProposal = await badSvc.createScan(user.id, 'chicken.jpg', 'PHOTO');
   check('malformed provider response -> scan FAILED (validation gate, fail-safe)', badProposal.status === 'FAILED');
   const badRow = await prisma.visionScan.findUnique({ where: { id: badProposal.scanId } });
@@ -695,11 +699,11 @@ async function main() {
   console.log('\n── V3.1: PROVIDER FAILURE / OFFLINE (network error, not "not found") ──');
   const throwingBarcodeProvider = { id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } };
   const throwingRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'throws' }), [throwingBarcodeProvider]);
-  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
+  const throwingSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, throwingRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit, shadowRunner);
   const throwScan = await throwingSvc.createBarcodeScan(user.id, '2223334445556');
   check('a real lookup failure (offline/timeout) is distinct from not-found — scan FAILED, same degradation contract as vision', throwScan.status === 'FAILED' && throwScan.fallback.reason === 'PROVIDER_ERROR' && throwScan.mode === 'FALLBACK');
   const unknownBarcodeRegistry = new BarcodeLookupProviderRegistry(new ConfigService({ BARCODE_LOOKUP_PROVIDER: 'ghost-barcode' }), [barcodeFixture]);
-  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
+  const unknownBarcodeSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, unknownBarcodeRegistry, ocrRegistry, priorReader, menuRegistry, trustEngine, trustAudit, shadowRunner);
   const unknownScan = await unknownBarcodeSvc.createBarcodeScan(user.id, '3334445556667');
   check('a misconfigured provider id fails the scan gracefully, never throws to the caller', unknownScan.status === 'FAILED' && unknownScan.mode === 'FALLBACK');
 
@@ -749,7 +753,7 @@ async function main() {
   const unreadableScan = await visionSvc.createLabelScan(user.id, 'unreadable-label.jpg');
   check('an unreadable label degrades to manual (serving 0 cannot be logged)', unreadableScan.status === 'FAILED' && unreadableScan.mode === 'FALLBACK');
   const throwingOcrRegistry = new OCRProviderRegistry(new ConfigService({ OCR_PROVIDER: 'throws' }), [{ id: 'throws', async extract() { throw new Error('NETWORK_TIMEOUT'); } }]);
-  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry, priorReader, menuRegistry, trustEngine, trustAudit);
+  const throwingOcrSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, throwingOcrRegistry, priorReader, menuRegistry, trustEngine, trustAudit, shadowRunner);
   const ocrFailScan = await throwingOcrSvc.createLabelScan(user.id, 'us-label.jpg');
   check('an OCR provider failure degrades to manual, never throws to the caller', ocrFailScan.status === 'FAILED' && ocrFailScan.fallback.reason === 'PROVIDER_ERROR');
 
@@ -888,10 +892,10 @@ async function main() {
 
   console.log('\n── V3.4: MENU SOURCE DEGRADATION (fail-soft, provider swap, determinism) ──');
   const throwingMenuRegistry = new RestaurantMenuProviderRegistry(new ConfigService({ RESTAURANT_MENU_PROVIDER: 'throws' }), [{ id: 'throws', async lookup() { throw new Error('NETWORK_TIMEOUT'); } }]);
-  const throwingMenuSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, throwingMenuRegistry);
+  const throwingMenuSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, throwingMenuRegistry, trustEngine, trustAudit, shadowRunner);
   const failMenuScan = await throwingMenuSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
   check('a menu source outage costs the candidates, NEVER the scan (fail-soft)', failMenuScan.status === 'PROPOSED' && failMenuScan.restaurant?.restaurantName === 'La Esquina Criolla' && failMenuScan.restaurant?.menuCandidates.length === 0);
-  const noneMenuSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, new RestaurantMenuProviderRegistry(new ConfigService({}), [new NullRestaurantMenuProvider()]));
+  const noneMenuSvc = new VisionScanService(prisma, foodSvc, logsSvc, registry, events, imageStore, barcodeRegistry, ocrRegistry, priorReader, new RestaurantMenuProviderRegistry(new ConfigService({}), [new NullRestaurantMenuProvider()]), trustEngine, trustAudit, shadowRunner);
   const noneScan = await noneMenuSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');
   check("the production default ('none') still surfaces context — only the menu candidates are absent", noneScan.restaurant?.restaurantName === 'La Esquina Criolla' && noneScan.restaurant?.menuCandidates.length === 0);
   const restScanAgain = await visionSvc.createScan(user.id, 'restaurant-lunch.jpg', 'PHOTO');

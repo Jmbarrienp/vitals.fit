@@ -23,6 +23,8 @@
     "smoke:vision": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-vision.ts",
     "smoke:learning": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-learning.ts",
     "smoke:rollout": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-rollout.ts",
+    "smoke:governance": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-governance.ts",
+    "smoke:promotion": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-promotion.ts",
     "eval:vision": "ts-node -P tsconfig.smoke.json --transpile-only scripts/eval-vision.ts"
   },
   "keywords": [],

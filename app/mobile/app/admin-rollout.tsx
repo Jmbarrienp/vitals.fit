@@ -24,20 +24,29 @@ const STAGE_COLOR: Record<string, string> = {
 };
 const LEVEL_COLOR: Record<string, string> = { LOW: '#22c55e', MEDIUM: '#f59e0b', HIGH: '#ef4444' };
 const GATE_COLOR: Record<string, string> = { PASS: '#22c55e', FAIL: '#ef4444', NOT_APPLICABLE: '#64748b' };
+/** V4.1 — governance verdicts. PROMOTE/DEMOTE are actions a human still has to take. */
+const ACTION_COLOR: Record<string, string> = {
+  PROMOTE: '#22c55e', MAINTAIN: '#38bdf8', DEMOTE: '#ef4444', HOLD: '#f59e0b', REQUIRE_MORE_DATA: '#64748b',
+};
+const DRIFT_COLOR: Record<string, string> = { STABLE: '#22c55e', DRIFTING: '#ef4444', INSUFFICIENT_DATA: '#64748b' };
 
 export default function AdminRolloutScreen() {
   const router = useRouter();
-  const [data, setData] = useState<{ status?: any; health?: any; risk?: any; trust?: any; timeline?: any }>({});
+  const [data, setData] = useState<{ status?: any; health?: any; risk?: any; trust?: any; timeline?: any; governance?: any; drift?: any; shadow?: any }>({});
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => {
     if (!FEATURES.adminDashboard) return;
     (async () => {
       try {
-        const [status, health, risk, trust, timeline] = await Promise.all([
+        const [status, health, risk, trust, timeline, governance, drift, shadow] = await Promise.all([
           rolloutApi.status(), rolloutApi.health(), rolloutApi.risk(), rolloutApi.trust(), rolloutApi.timeline(),
+          rolloutApi.governanceRecommendation(), rolloutApi.governanceDrift(), rolloutApi.governanceShadow(),
         ]);
-        setData({ status: status.data, health: health.data, risk: risk.data, trust: trust.data, timeline: timeline.data });
+        setData({
+          status: status.data, health: health.data, risk: risk.data, trust: trust.data, timeline: timeline.data,
+          governance: governance.data, drift: drift.data, shadow: shadow.data,
+        });
         setState('ready');
       } catch {
         setState('error');
@@ -92,6 +101,26 @@ export default function AdminRolloutScreen() {
                   <Text className="text-text-muted text-[10px]">{m.reasons?.[0]}</Text>
                 </View>
               ))}
+            </Card>
+
+            <Card className="mb-3">
+              <View className="flex-row items-center justify-between mb-1">
+                <Text className="text-text-primary text-base font-semibold">Gobernanza de proveedor</Text>
+                <Badge label={data.governance?.action ?? '—'} color={ACTION_COLOR[data.governance?.action] ?? '#64748b'} />
+              </View>
+              <Text className="text-text-muted text-[11px] mb-2">
+                {data.governance?.incumbentId} vs {data.governance?.challengerId ?? 'sin challenger'} · {data.governance?.evidence?.pairedScans ?? 0} scans pareados
+              </Text>
+              {(data.governance?.reasons ?? []).slice(0, 3).map((r: string, i: number) => (
+                <Text key={i} className="text-text-muted text-[10px] mb-0.5">• {r}</Text>
+              ))}
+              <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-border">
+                <Text className="text-text-muted text-xs">Deriva del incumbente</Text>
+                <Badge label={data.drift?.verdict ?? '—'} color={DRIFT_COLOR[data.drift?.verdict] ?? '#64748b'} />
+              </View>
+              <Text className="text-text-muted text-[10px] mt-1">
+                sombra: {data.shadow?.totalRuns ?? 0} corridas · muestreo {Math.round((data.shadow?.sampleRate ?? 0) * 100)}%
+              </Text>
             </Card>
 
             <Card className="mb-3">
