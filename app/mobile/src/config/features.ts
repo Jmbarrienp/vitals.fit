@@ -13,4 +13,6 @@ export const FEATURES = {
   visionCapture: process.env.EXPO_PUBLIC_VISION_ENABLED === 'true',
   barcodeScan: process.env.EXPO_PUBLIC_BARCODE_ENABLED === 'true',
   labelScan: process.env.EXPO_PUBLIC_LABEL_OCR_ENABLED === 'true',
+  /** V4.0 — operator-only rollout dashboard. Never shown to end users. */
+  adminDashboard: process.env.EXPO_PUBLIC_ADMIN_DASHBOARD === 'true',
 };

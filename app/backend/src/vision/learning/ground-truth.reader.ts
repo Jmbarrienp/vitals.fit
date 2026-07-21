@@ -15,8 +15,15 @@ import { EVAL_CONTRACT_VERSION, GroundTruthDataset, GroundTruthExample, ScanOutc
  * V3.3 added method attribution, V3.5 finally reads all of it as ground truth.
  */
 
-/** Terminal statuses — a PROCESSING/PROPOSED scan is not an outcome yet. */
-const TERMINAL_STATUSES = ['LOGGED', 'CONFIRMED', 'REJECTED', 'EXPIRED', 'FAILED', 'FALLBACK_MANUAL'];
+/**
+ * Terminal statuses — a PROCESSING/PROPOSED scan is not an outcome yet.
+ * 'UNDONE' (V3.6) is very much an outcome — the strongest negative ground truth
+ * there is (the platform acted and was told no). V4.0's audit found it missing
+ * here: undone scans were silently invisible to every evaluation dataset,
+ * which would have made auto-accept look better than it is. Centralized fix,
+ * not a rollout-side patch — one list, one truth.
+ */
+const TERMINAL_STATUSES = ['LOGGED', 'CONFIRMED', 'REJECTED', 'EXPIRED', 'FAILED', 'FALLBACK_MANUAL', 'UNDONE'];
 /** Failure reasons attributable to the provider, for the availability metric. */
 const PROVIDER_FAILURE_PATTERNS = ['VISION_PROVIDER', 'VISION_RECOGNIZE_TIMEOUT', 'VISION_INVALID_PROVIDER_RESPONSE'];
 

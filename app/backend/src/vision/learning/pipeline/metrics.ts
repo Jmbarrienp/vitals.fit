@@ -137,8 +137,13 @@ function bandOf(confidence: number): string {
   return 'HIGH';
 }
 
-function acceptance(scans: { status: string }[]): MaybeMetric {
-  const decided = scans.filter((s) => ['LOGGED', 'CONFIRMED', 'REJECTED', 'FALLBACK_MANUAL'].includes(s.status));
+/**
+ * Acceptance among DECIDED scans. Exported since V4.0 so the rollout health
+ * engine reuses this exact definition instead of growing a second one —
+ * one metric, one truth. UNDONE counts as decided-and-not-accepted.
+ */
+export function acceptance(scans: { status: string }[]): MaybeMetric {
+  const decided = scans.filter((s) => ['LOGGED', 'CONFIRMED', 'REJECTED', 'FALLBACK_MANUAL', 'UNDONE'].includes(s.status));
   const accepted = decided.filter((s) => s.status === 'LOGGED' || s.status === 'CONFIRMED');
   return ratio(accepted.length, decided.length);
 }

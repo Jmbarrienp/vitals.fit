@@ -27,6 +27,9 @@ import { TrustEvidenceReader } from './learning/trust-evidence.reader';
 import { TrustEngine } from './learning/trust.engine';
 import { TrustAuditService } from './learning/trust-audit.service';
 import { PromotionExecutor } from './learning/promotion.executor';
+import { RolloutDataReader } from './rollout/rollout-data.reader';
+import { RolloutEngine } from './rollout/rollout.engine';
+import { RolloutController } from './rollout/rollout.controller';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -123,8 +126,14 @@ import { PromotionExecutor } from './learning/promotion.executor';
     TrustAuditService,
     TrustEngine,
     PromotionExecutor,
+
+    // Shadow rollout + trust analytics (V4.0) — observes only. Derives rollout
+    // stages, health, gates, risk and timelines from append-only data through
+    // the owners above; has no write access and no path to any flag.
+    RolloutDataReader,
+    RolloutEngine,
   ],
-  controllers: [VisionController, LearningController],
+  controllers: [VisionController, LearningController, RolloutController],
   exports: [VisionScanService],
 })
 export class VisionModule {}
