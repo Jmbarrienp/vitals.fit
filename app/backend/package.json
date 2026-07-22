@@ -25,6 +25,7 @@
     "smoke:rollout": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-rollout.ts",
     "smoke:governance": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-governance.ts",
     "smoke:promotion": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-promotion.ts",
+    "smoke:rollback": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-rollback.ts",
     "eval:vision": "ts-node -P tsconfig.smoke.json --transpile-only scripts/eval-vision.ts"
   },
   "keywords": [],

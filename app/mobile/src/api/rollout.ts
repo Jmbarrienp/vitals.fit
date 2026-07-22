@@ -21,4 +21,7 @@ export const rolloutApi = {
 
   /** V4.2 — promotion execution plan (pure consumer; read-only). */
   promotionPlan: (days?: number) => apiClient.get<any>('/vision/promotion-plan', { params: { days } }),
+
+  /** V4.3 — safe rollback execution plan (pure consumer; read-only). */
+  rollbackPlan: (days?: number) => apiClient.get<any>('/vision/rollback', { params: { days } }),
 };

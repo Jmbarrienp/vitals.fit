@@ -35,6 +35,8 @@ import { GovernanceEngine } from './governance/governance.engine';
 import { GovernanceController } from './governance/governance.controller';
 import { PromotionExecutorEngine } from './promotion/promotion-executor.engine';
 import { PromotionController } from './promotion/promotion.controller';
+import { RollbackEngine } from './rollback/rollback.engine';
+import { RollbackController } from './rollback/rollback.controller';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -151,8 +153,14 @@ import { PromotionController } from './promotion/promotion.controller';
     // auditable execution plan. Recomputes no statistic, writes nothing,
     // executes nothing — it builds a document a human acts on.
     PromotionExecutorEngine,
+
+    // Safe Rollback (V4.3) — the mirror of the Promotion Executor and equally a
+    // pure consumer. Consumes the ROLLBACK_REQUIRED gate, governance drift/
+    // DEMOTE, health and risk to decide WHICH safe lever to pull and HOW.
+    // Recomputes no metric, writes nothing, rolls back nothing.
+    RollbackEngine,
   ],
-  controllers: [VisionController, LearningController, RolloutController, GovernanceController, PromotionController],
+  controllers: [VisionController, LearningController, RolloutController, GovernanceController, PromotionController, RollbackController],
   exports: [VisionScanService],
 })
 export class VisionModule {}
