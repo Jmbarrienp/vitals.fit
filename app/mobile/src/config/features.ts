@@ -15,4 +15,6 @@ export const FEATURES = {
   labelScan: process.env.EXPO_PUBLIC_LABEL_OCR_ENABLED === 'true',
   /** V4.0 — operator-only rollout dashboard. Never shown to end users. */
   adminDashboard: process.env.EXPO_PUBLIC_ADMIN_DASHBOARD === 'true',
+  /** V5.0 — the Copilot session screen. Default off (progressive enhancement, as always). */
+  copilot: process.env.EXPO_PUBLIC_COPILOT_ENABLED === 'true',
 };

@@ -27,6 +27,8 @@
     "smoke:promotion": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-promotion.ts",
     "smoke:rollback": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-rollback.ts",
     "smoke:canary": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-canary.ts",
+    "smoke:copilot": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-copilot.ts",
+    "smoke:dailycopilot": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-dailycopilot.ts",
     "eval:vision": "ts-node -P tsconfig.smoke.json --transpile-only scripts/eval-vision.ts"
   },
   "keywords": [],

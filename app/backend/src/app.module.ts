@@ -19,6 +19,7 @@ import { CoachModule } from './coach/coach.module';
 import { PlannerModule } from './planner/planner.module';
 import { MealPlannerModule } from './meal-planner/meal-planner.module';
 import { VisionModule } from './vision/vision.module';
+import { CopilotModule } from './copilot/copilot.module';
 
 @Module({
   controllers: [AppController],
@@ -42,6 +43,7 @@ import { VisionModule } from './vision/vision.module';
     PlannerModule,
     MealPlannerModule,
     VisionModule,
+    CopilotModule,
   ],
 })
 export class AppModule {}
