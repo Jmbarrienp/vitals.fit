@@ -37,6 +37,8 @@ import { PromotionExecutorEngine } from './promotion/promotion-executor.engine';
 import { PromotionController } from './promotion/promotion.controller';
 import { RollbackEngine } from './rollback/rollback.engine';
 import { RollbackController } from './rollback/rollback.controller';
+import { CanaryEngine } from './canary/canary.engine';
+import { CanaryController } from './canary/canary.controller';
 
 /**
  * The Vision bounded context (Phase 2D.2) — a severable plug-in. Imports only
@@ -159,8 +161,15 @@ import { RollbackController } from './rollback/rollback.controller';
     // DEMOTE, health and risk to decide WHICH safe lever to pull and HOW.
     // Recomputes no metric, writes nothing, rolls back nothing.
     RollbackEngine,
+
+    // Progressive Canary (V4.4) — sits on top of the Promotion Executor's
+    // ladder and the Rollback Engine's abort verdict, and recommends the next
+    // canary move (advance/stay/hold/pause/rollback/complete). Consumes both
+    // plans, recomputes nothing, and advances no traffic — the progression
+    // LOGIC is deterministic; the machine does not act.
+    CanaryEngine,
   ],
-  controllers: [VisionController, LearningController, RolloutController, GovernanceController, PromotionController, RollbackController],
+  controllers: [VisionController, LearningController, RolloutController, GovernanceController, PromotionController, RollbackController, CanaryController],
   exports: [VisionScanService],
 })
 export class VisionModule {}

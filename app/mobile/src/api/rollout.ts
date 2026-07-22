@@ -24,4 +24,7 @@ export const rolloutApi = {
 
   /** V4.3 — safe rollback execution plan (pure consumer; read-only). */
   rollbackPlan: (days?: number) => apiClient.get<any>('/vision/rollback', { params: { days } }),
+
+  /** V4.4 — progressive canary progression plan (pure consumer; read-only). atPercent = current position. */
+  canaryPlan: (atPercent = 0, days?: number) => apiClient.get<any>('/vision/canary', { params: { atPercent, days } }),
 };
