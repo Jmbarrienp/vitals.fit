@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 import { PromotionExecutorEngine } from './promotion-executor.engine';
 
 /**
@@ -8,7 +9,7 @@ import { PromotionExecutorEngine } from './promotion-executor.engine';
  * flag, or write anything. The plan is a document a human reads; these routes
  * hand it over, they do not act on it.
  */
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class PromotionController {
   constructor(private readonly engine: PromotionExecutorEngine) {}

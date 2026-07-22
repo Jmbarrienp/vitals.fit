@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RateLimit } from '../common/guards/rate-limit.guard';
 import { VisionScanService } from './vision-scan.service';
 import { CreateScanDto } from './dto/create-scan.dto';
 import { CreateBarcodeScanDto } from './dto/create-barcode-scan.dto';
@@ -22,6 +23,7 @@ export class VisionController {
    * never leaves the backend and mobile never talks to a provider — it posts a
    * photo to this endpoint and receives a platform-shaped proposal.
    */
+  @RateLimit('VISION')
   @Post()
   create(@Request() req: { user: { id: string } }, @Body() dto: CreateScanDto) {
     if (!dto.imageBase64 && !dto.imageRef) {
@@ -41,6 +43,7 @@ export class VisionController {
    * reject/fallback/get below are shared unchanged since the VisionScan
    * lifecycle they operate on is source-agnostic.
    */
+  @RateLimit('BARCODE')
   @Post('barcode')
   createBarcode(@Request() req: { user: { id: string } }, @Body() dto: CreateBarcodeScanDto) {
     return this.scans.createBarcodeScan(req.user.id, dto.barcode);
@@ -52,6 +55,7 @@ export class VisionController {
    * comes back with `label` carrying the transcribed facts for the user to edit
    * and confirm; confirm/reject/fallback below are shared unchanged.
    */
+  @RateLimit('VISION')
   @Post('label')
   createLabel(@Request() req: { user: { id: string } }, @Body() dto: CreateLabelScanDto) {
     if (!dto.imageBase64 && !dto.imageRef) {

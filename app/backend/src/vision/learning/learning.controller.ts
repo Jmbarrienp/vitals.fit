@@ -1,17 +1,20 @@
 import { BadRequestException, Controller, Get, Param, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 import { EvaluationEngine } from './evaluation.engine';
 import { TrustAuditService } from './trust-audit.service';
 import { PromotionExecutor } from './promotion.executor';
 
 /**
- * Admin/eval endpoints for the learning subsystem (V3.5). Read-only by
- * construction — every route derives a report; none can mutate anything.
+ * Endpoints for the learning subsystem (V3.5). Read-only by construction —
+ * every route derives a report; none can mutate anything.
  *
- * Guarded with the platform's JWT guard (the only auth seam that exists
- * today). When a role system lands, these routes are the first candidates for
- * an admin role — they expose aggregate metrics, so they must never leak
- * another user's raw rows: everything returned is already aggregated.
+ * V5.3 — this controller is deliberately MIXED, so the operator gate is
+ * applied per ROUTE rather than to the class: `trust` and `trust/scan/:id`
+ * return the CALLER'S OWN data and must stay available to ordinary users,
+ * while every platform-wide analytic (statistics, scorecards, calibration,
+ * comparison, replay, promotion) is operator-only. Guarding the whole class
+ * would have silently removed a user-facing feature.
  */
 @UseGuards(JwtAuthGuard)
 @Controller('vision/learning')
@@ -42,6 +45,7 @@ export class LearningController {
   }
 
   /** Platform-wide trust statistics — aggregate only, never another user's rows. */
+  @UseGuards(AdminGuard)
   @Get('trust/statistics')
   trustStatistics(@Query('days') days?: string) {
     return this.audit.statistics(parseDays(days) ?? 30);
@@ -52,6 +56,7 @@ export class LearningController {
    * verdict and adds risk, impact and a human checklist. Nothing here can
    * switch a provider; that stays a human flipping VISION_PROVIDER.
    */
+  @UseGuards(AdminGuard)
   @Get('promotion')
   promotionRecommendation(
     @Query('incumbent') incumbent?: string,
@@ -67,6 +72,7 @@ export class LearningController {
    * auto-accept policy consumes exactly this signal, so operators need to see
    * it directly.
    */
+  @UseGuards(AdminGuard)
   @Get('calibration/health')
   async calibrationHealth(@Query('providerId') providerId?: string, @Query('days') days?: string) {
     if (!providerId) throw new BadRequestException('providerId is required.');
@@ -86,23 +92,27 @@ export class LearningController {
 
   // ── V3.5 evaluation surfaces ───────────────────────────────────────────────
 
+  @UseGuards(AdminGuard)
   @Get('summary')
   summary(@Query('days') days?: string) {
     return this.engine.summary({ days: parseDays(days) });
   }
 
+  @UseGuards(AdminGuard)
   @Get('scorecard')
   scorecard(@Query('providerId') providerId?: string, @Query('days') days?: string) {
     if (!providerId) throw new BadRequestException('providerId is required.');
     return this.engine.scorecard(providerId, { days: parseDays(days) });
   }
 
+  @UseGuards(AdminGuard)
   @Get('calibration')
   calibration(@Query('providerId') providerId?: string, @Query('days') days?: string) {
     if (!providerId) throw new BadRequestException('providerId is required.');
     return this.engine.calibration(providerId, { days: parseDays(days) });
   }
 
+  @UseGuards(AdminGuard)
   @Get('comparison')
   comparison(
     @Query('incumbent') incumbent?: string,
@@ -113,6 +123,7 @@ export class LearningController {
     return this.engine.compare(incumbent, challenger, { days: parseDays(days) });
   }
 
+  @UseGuards(AdminGuard)
   @Get('replay')
   replay(@Query('days') days?: string) {
     return this.engine.replay({ days: parseDays(days) });

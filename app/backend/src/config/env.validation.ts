@@ -84,8 +84,34 @@ export function collectEnvProblems(env: Record<string, unknown>): EnvValidationR
     errors.push(`PORT must be an integer (got "${String(port)}").`);
   }
 
-  // ── Production-only posture warnings (never block a deploy) ──
+  // ── Rate limiting (V5.3): shape only; every rule has a documented default. ──
+  for (const key of ['RATE_LIMIT_AUTH', 'RATE_LIMIT_VISION', 'RATE_LIMIT_BARCODE', 'RATE_LIMIT_DEFAULT']) {
+    const value = env[key];
+    if (value !== undefined && value !== '' && (!Number.isFinite(Number(value)) || Number(value) <= 0)) {
+      errors.push(`${key} must be a positive number (got "${String(value)}").`);
+    }
+  }
+  if (String(env.RATE_LIMIT_ENABLED ?? '').toLowerCase() === 'false' && isProduction) {
+    warnings.push('RATE_LIMIT_ENABLED=false in production — login brute force and Vision cost abuse are both unbounded. Confirm this is deliberate.');
+  }
+
+  // ── Production posture (V5.3) ──
   if (isProduction) {
+    // CORS: the wildcard shipped in V5.2 is refused here. Native mobile
+    // clients send no Origin and are unaffected by an empty allowlist.
+    const corsOrigins = str(env.CORS_ORIGINS);
+    if (corsOrigins === '*') {
+      errors.push('CORS_ORIGINS must not be "*" in production — an explicit allowlist is required (or leave it unset to reject all browser origins).');
+    } else if (!corsOrigins) {
+      warnings.push('CORS_ORIGINS is not set — every browser origin is rejected. Correct for a native-mobile-only client; set an allowlist before shipping a web client.');
+    }
+
+    // Operator separation: unset means the governance endpoints are closed to
+    // everyone, which is safe but usually not what the operator intended.
+    if (!str(env.ADMIN_EMAILS)) {
+      warnings.push('ADMIN_EMAILS is not set — operator endpoints (governance, rollout, promotion, rollback, canary) are denied to EVERYONE. Set it to grant operator access.');
+    }
+
     if (!str(env.ANTHROPIC_API_KEY)) {
       warnings.push('ANTHROPIC_API_KEY is not set — AI features degrade to their deterministic fallbacks (by design, but confirm this is intended).');
     }

@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 import { RolloutEngine } from './rollout.engine';
 
 /**
@@ -9,7 +10,7 @@ import { RolloutEngine } from './rollout.engine';
  * raw rows. Guarded by the platform's JWT guard (first candidates for an
  * admin role when one exists).
  */
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class RolloutController {
   constructor(private readonly engine: RolloutEngine) {}

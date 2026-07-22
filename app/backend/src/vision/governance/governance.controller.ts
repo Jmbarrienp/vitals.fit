@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 import { GovernanceEngine } from './governance.engine';
 
 /**
@@ -9,7 +10,7 @@ import { GovernanceEngine } from './governance.engine';
  * shadow evidence is stored as platform-shaped detections, so there is nothing
  * vendor-specific here to leak.
  */
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision/governance')
 export class GovernanceController {
   constructor(private readonly engine: GovernanceEngine) {}

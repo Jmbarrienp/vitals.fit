@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 import { CanaryEngine } from './canary.engine';
 
 /**
@@ -11,7 +12,7 @@ import { CanaryEngine } from './canary.engine';
  * `atPercent` is the operator's stated current position (0..100; default 0 =
  * pre-rollout), since the platform persists no live canary state.
  */
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class CanaryController {
   constructor(private readonly engine: CanaryEngine) {}

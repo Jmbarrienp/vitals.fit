@@ -4,7 +4,10 @@ import { NestFactory, Reflector } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { ConfigService } from '@nestjs/config';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
+import { resolveCors } from './config/production-config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -30,11 +33,24 @@ async function bootstrap() {
   // database connections.
   app.enableShutdownHooks();
 
+  // V5.2 shipped `origin: '*'` with Authorization allowed. Harmless for a pure
+  // native client, an open door the day a web client exists — so production
+  // now requires an explicit allowlist (and boot refuses "*" outright).
+  const cors = resolveCors(process.env as unknown as Record<string, unknown>);
   app.enableCors({
-    origin: '*',
+    origin: cors.origin,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
+  logger.log(`CORS: ${cors.reason}`);
+
+  // Render terminates TLS at its proxy; without this the rate limiter would
+  // bucket every request under the proxy's address instead of the client's.
+  app.set('trust proxy', 1);
+
+  // V5.3 — global rate limiting. Routes opt into a tighter bucket with
+  // @RateLimit('AUTH' | 'VISION' | 'BARCODE'); everything else gets DEFAULT.
+  app.useGlobalGuards(new RateLimitGuard(app.get(Reflector), app.get(ConfigService)));
 
   app.setGlobalPrefix('api');
 

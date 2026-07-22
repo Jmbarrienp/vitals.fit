@@ -30,7 +30,10 @@
     "smoke:copilot": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-copilot.ts",
     "smoke:dailycopilot": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-dailycopilot.ts",
     "smoke:production": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-production.ts",
-    "eval:vision": "ts-node -P tsconfig.smoke.json --transpile-only scripts/eval-vision.ts"
+    "eval:vision": "ts-node -P tsconfig.smoke.json --transpile-only scripts/eval-vision.ts",
+    "preflight": "ts-node -P tsconfig.smoke.json --transpile-only scripts/preflight.ts",
+    "smoke:deploy": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-deploy.ts",
+    "deploy:check": "npm run preflight && npm run smoke:deploy"
   },
   "keywords": [],
   "author": "",

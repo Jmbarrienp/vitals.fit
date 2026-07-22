@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 import { RollbackEngine } from './rollback.engine';
 
 /**
@@ -8,7 +9,7 @@ import { RollbackEngine } from './rollback.engine';
  * provider, or write anything. The plan is a document a human reads and acts
  * on; these routes hand it over, they do not act on it.
  */
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class RollbackController {
   constructor(private readonly engine: RollbackEngine) {}
