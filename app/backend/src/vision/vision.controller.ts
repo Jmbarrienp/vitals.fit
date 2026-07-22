@@ -59,7 +59,9 @@ export class VisionController {
   @Post('label')
   createLabel(@Request() req: { user: { id: string } }, @Body() dto: CreateLabelScanDto) {
     if (!dto.imageBase64 && !dto.imageRef) {
-      throw new BadRequestException('Provide either imageBase64 (a captured label photo) or imageRef (a stable reference).');
+      throw new BadRequestException(
+        'Provide either imageBase64 (a captured label photo) or imageRef (a stable reference).',
+      );
     }
     if (dto.imageBase64 && !dto.imageMimeType) {
       throw new BadRequestException('imageMimeType is required when sending imageBase64.');

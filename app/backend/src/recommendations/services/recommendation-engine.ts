@@ -129,10 +129,7 @@ export function decideNudge(input: RecommendationInput): StructuredRecommendatio
       'Esta semana registraste pocos días. No busques perfección — registrar aunque sea una comida al día mantiene tus datos vivos.',
     );
 
-  return build(
-    RecommendationReason.STEADY,
-    `Llevas ${calLogged} de ${calTarget} kcal hoy (${pct}%). Vas bien.`,
-  );
+  return build(RecommendationReason.STEADY, `Llevas ${calLogged} de ${calTarget} kcal hoy (${pct}%). Vas bien.`);
 }
 
 /**

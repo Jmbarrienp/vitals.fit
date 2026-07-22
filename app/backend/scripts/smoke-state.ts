@@ -98,7 +98,11 @@ async function main() {
     { date: daysAgo(7), weightKg: 80 },
     { date: daysAgo(0), weightKg: 79.4 },
   ]);
-  check('computeWeightTrend(downhill) → negative kg/wk', (downhill.weeklyRateKg ?? 0) < 0, `rate=${downhill.weeklyRateKg}`);
+  check(
+    'computeWeightTrend(downhill) → negative kg/wk',
+    (downhill.weeklyRateKg ?? 0) < 0,
+    `rate=${downhill.weeklyRateKg}`,
+  );
 
   // ── DB-level rollup ──
   console.log('\n── ROLLUP ──');
@@ -106,8 +110,18 @@ async function main() {
   const uid = user.id;
   await prisma.goal.create({
     data: {
-      userId: uid, type: 'LOSE_FAT', targetCalories: 1900, proteinG: 150, carbsG: 180, fatG: 60,
-      fiberTargetG: 30, waterMl: 2500, bmr: 1500, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: -300,
+      userId: uid,
+      type: 'LOSE_FAT',
+      targetCalories: 1900,
+      proteinG: 150,
+      carbsG: 180,
+      fatG: 60,
+      fiberTargetG: 30,
+      waterMl: 2500,
+      bmr: 1500,
+      tdee: 2200,
+      formulaUsed: 'mifflin_st_jeor',
+      goalAdjustment: -300,
     },
   });
 
@@ -118,18 +132,46 @@ async function main() {
   check('nuevo: trendStatus=insufficient_data', s0.trendStatus === 'insufficient_data');
   check('nuevo: snapshot de meta (target 1900)', s0.goalType === 'LOSE_FAT' && s0.calorieTarget === 1900);
   check('nuevo: stale=false, version=3 tras recompute', s0.stale === false && s0.version === 3);
-  check('nuevo: scores null, plateau INSUFFICIENT_DATA, sin flags', s0.adherenceScore === null && s0.nutritionScore === null && s0.plateauStatus === 'INSUFFICIENT_DATA' && s0.behaviorFlags.length === 0);
+  check(
+    'nuevo: scores null, plateau INSUFFICIENT_DATA, sin flags',
+    s0.adherenceScore === null &&
+      s0.nutritionScore === null &&
+      s0.plateauStatus === 'INSUFFICIENT_DATA' &&
+      s0.behaviorFlags.length === 0,
+  );
 
   // 2. Insertar 4 días logueados (dentro de 7d) con 2 comidas c/u + streak
   await prisma.userHabits.create({ data: { userId: uid, currentStreak: 4 } });
-  for (const [d, cal, prot] of [[1, 1800, 120], [2, 2000, 140], [3, 1700, 110], [5, 1900, 130]] as const) {
+  for (const [d, cal, prot] of [
+    [1, 1800, 120],
+    [2, 2000, 140],
+    [3, 1700, 110],
+    [5, 1900, 130],
+  ] as const) {
     await prisma.dailyLog.create({
       data: {
-        userId: uid, date: daysAgo(d), caloriesLogged: cal, proteinG: prot, planFollowed: true, adherencePct: 0.9,
+        userId: uid,
+        date: daysAgo(d),
+        caloriesLogged: cal,
+        proteinG: prot,
+        planFollowed: true,
+        adherencePct: 0.9,
         loggedMeals: {
           create: [
-            { mealType: 'LUNCH', totalCalories: Math.round(cal * 0.6), totalProteinG: prot * 0.6, totalCarbsG: 50, totalFatG: 20 },
-            { mealType: 'DINNER', totalCalories: Math.round(cal * 0.4), totalProteinG: prot * 0.4, totalCarbsG: 30, totalFatG: 15 },
+            {
+              mealType: 'LUNCH',
+              totalCalories: Math.round(cal * 0.6),
+              totalProteinG: prot * 0.6,
+              totalCarbsG: 50,
+              totalFatG: 20,
+            },
+            {
+              mealType: 'DINNER',
+              totalCalories: Math.round(cal * 0.4),
+              totalProteinG: prot * 0.4,
+              totalCarbsG: 30,
+              totalFatG: 15,
+            },
           ],
         },
       },
@@ -145,13 +187,26 @@ async function main() {
   // 2B.1: streaks are now LOG-DERIVED (not from UserHabits). Logs at days {1,2,3,5}:
   // day 4 is missing, so the consecutive streak ending yesterday is 3 (days 1-2-3).
   check('logs: loggingStreak=3 (log-derived, day-4 gap breaks it)', s1.loggingStreak === 3, `got ${s1.loggingStreak}`);
-  check('logs: calorieStreakDays=3 (1800/2000/1700 within band)', s1.calorieStreakDays === 3, `got ${s1.calorieStreakDays}`);
-  check('logs: proteinStreakDays=0 (120 < 90% of 150 target)', s1.proteinStreakDays === 0, `got ${s1.proteinStreakDays}`);
+  check(
+    'logs: calorieStreakDays=3 (1800/2000/1700 within band)',
+    s1.calorieStreakDays === 3,
+    `got ${s1.calorieStreakDays}`,
+  );
+  check(
+    'logs: proteinStreakDays=0 (120 < 90% of 150 target)',
+    s1.proteinStreakDays === 0,
+    `got ${s1.proteinStreakDays}`,
+  );
   check('logs: avgMealsPerDay=2', s1.avgMealsPerDay === 2, `got ${s1.avgMealsPerDay}`);
   check('logs: adherencePct7d=90', s1.adherencePct7d === 90, `got ${s1.adherencePct7d}`);
 
   // 3. Tendencia de peso goal-aware (LOSE_FAT + bajando → on_track)
-  for (const [d, kg] of [[21, 81], [14, 80.5], [7, 80], [1, 79.3]] as const) {
+  for (const [d, kg] of [
+    [21, 81],
+    [14, 80.5],
+    [7, 80],
+    [1, 79.3],
+  ] as const) {
     await prisma.weightLog.create({ data: { userId: uid, date: daysAgo(d), weightKg: kg } });
   }
   const s2 = await state.recompute(uid);
@@ -163,7 +218,11 @@ async function main() {
   // ── 2A.2 estado derivado ──
   console.log('\n── ESTADO DERIVADO (2A.2) ──');
   check('version bump a 3', s2.version === 3, `v=${s2.version}`);
-  check('adherenceScore=64 (4/7 días, streak 3 log-derived, adherencia 90)', s2.adherenceScore === 64, `got ${s2.adherenceScore}`);
+  check(
+    'adherenceScore=64 (4/7 días, streak 3 log-derived, adherencia 90)',
+    s2.adherenceScore === 64,
+    `got ${s2.adherenceScore}`,
+  );
   check('nutritionScore=90 (1850 vs 1900, prot 125/150)', s2.nutritionScore === 90, `got ${s2.nutritionScore}`);
   check('flag BREAKFAST_SKIPPED (solo lunch/dinner)', s2.behaviorFlags.includes('BREAKFAST_SKIPPED' as any));
   check('NO flag PROTEIN_CHRONIC_LOW (proteína adecuada)', !s2.behaviorFlags.includes('PROTEIN_CHRONIC_LOW' as any));
@@ -172,16 +231,36 @@ async function main() {
   // PROTEIN_CHRONIC_LOW: proteína muy baja vs target
   const pUser = await prisma.user.create({ data: { email: 'protein@test.local' } });
   await prisma.goal.create({
-    data: { userId: pUser.id, type: 'LOSE_FAT', targetCalories: 1900, proteinG: 150, carbsG: 180, fatG: 60, fiberTargetG: 30, waterMl: 2500, bmr: 1500, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: -300 },
+    data: {
+      userId: pUser.id,
+      type: 'LOSE_FAT',
+      targetCalories: 1900,
+      proteinG: 150,
+      carbsG: 180,
+      fatG: 60,
+      fiberTargetG: 30,
+      waterMl: 2500,
+      bmr: 1500,
+      tdee: 2200,
+      formulaUsed: 'mifflin_st_jeor',
+      goalAdjustment: -300,
+    },
   });
   for (const d of [1, 2, 3, 4]) {
     await prisma.dailyLog.create({
       data: {
-        userId: pUser.id, date: daysAgo(d), caloriesLogged: 1800, proteinG: 50, planFollowed: true, adherencePct: 0.8,
-        loggedMeals: { create: [
-          { mealType: 'BREAKFAST', totalCalories: 600, totalProteinG: 20, totalCarbsG: 50, totalFatG: 15 },
-          { mealType: 'LUNCH', totalCalories: 1200, totalProteinG: 30, totalCarbsG: 80, totalFatG: 30 },
-        ] },
+        userId: pUser.id,
+        date: daysAgo(d),
+        caloriesLogged: 1800,
+        proteinG: 50,
+        planFollowed: true,
+        adherencePct: 0.8,
+        loggedMeals: {
+          create: [
+            { mealType: 'BREAKFAST', totalCalories: 600, totalProteinG: 20, totalCarbsG: 50, totalFatG: 15 },
+            { mealType: 'LUNCH', totalCalories: 1200, totalProteinG: 30, totalCarbsG: 80, totalFatG: 30 },
+          ],
+        },
       },
     });
   }
@@ -192,21 +271,46 @@ async function main() {
   // PLATEAU_SUSPECTED: LOSE_FAT + adherencia alta + peso plano
   const plUser = await prisma.user.create({ data: { email: 'plateau@test.local' } });
   await prisma.goal.create({
-    data: { userId: plUser.id, type: 'LOSE_FAT', targetCalories: 1900, proteinG: 150, carbsG: 180, fatG: 60, fiberTargetG: 30, waterMl: 2500, bmr: 1500, tdee: 2200, formulaUsed: 'mifflin_st_jeor', goalAdjustment: -300 },
+    data: {
+      userId: plUser.id,
+      type: 'LOSE_FAT',
+      targetCalories: 1900,
+      proteinG: 150,
+      carbsG: 180,
+      fatG: 60,
+      fiberTargetG: 30,
+      waterMl: 2500,
+      bmr: 1500,
+      tdee: 2200,
+      formulaUsed: 'mifflin_st_jeor',
+      goalAdjustment: -300,
+    },
   });
   await prisma.userHabits.create({ data: { userId: plUser.id, currentStreak: 7 } });
   for (const d of [1, 2, 3, 4, 5, 6]) {
     await prisma.dailyLog.create({
       data: {
-        userId: plUser.id, date: daysAgo(d), caloriesLogged: 1850, proteinG: 140, planFollowed: true, adherencePct: 1.0,
-        loggedMeals: { create: [
-          { mealType: 'BREAKFAST', totalCalories: 500, totalProteinG: 40, totalCarbsG: 40, totalFatG: 15 },
-          { mealType: 'LUNCH', totalCalories: 1350, totalProteinG: 100, totalCarbsG: 120, totalFatG: 40 },
-        ] },
+        userId: plUser.id,
+        date: daysAgo(d),
+        caloriesLogged: 1850,
+        proteinG: 140,
+        planFollowed: true,
+        adherencePct: 1.0,
+        loggedMeals: {
+          create: [
+            { mealType: 'BREAKFAST', totalCalories: 500, totalProteinG: 40, totalCarbsG: 40, totalFatG: 15 },
+            { mealType: 'LUNCH', totalCalories: 1350, totalProteinG: 100, totalCarbsG: 120, totalFatG: 40 },
+          ],
+        },
       },
     });
   }
-  for (const [d, kg] of [[21, 80], [14, 80.1], [7, 79.9], [1, 80.0]] as const) {
+  for (const [d, kg] of [
+    [21, 80],
+    [14, 80.1],
+    [7, 79.9],
+    [1, 80.0],
+  ] as const) {
     await prisma.weightLog.create({ data: { userId: plUser.id, date: daysAgo(d), weightKg: kg } });
   }
   const sPl = await state.recompute(plUser.id);
@@ -227,20 +331,37 @@ async function main() {
   const b = await state.recompute(uid);
   check(
     'idempotente: dos recomputes → mismos valores',
-    a.daysLogged30d === b.daysLogged30d && a.weightTrendKgWk === b.weightTrendKgWk && a.adherencePct7d === b.adherencePct7d,
+    a.daysLogged30d === b.daysLogged30d &&
+      a.weightTrendKgWk === b.weightTrendKgWk &&
+      a.adherencePct7d === b.adherencePct7d,
   );
 
   // 6. markStale sobre usuario sin fila → no lanza (updateMany no-op)
   const other = await prisma.user.create({ data: { email: 'state2@test.local' } });
   let threw = false;
-  try { await state.markStale(other.id); } catch { threw = true; }
+  try {
+    await state.markStale(other.id);
+  } catch {
+    threw = true;
+  }
   check('markStale sin fila previa → no lanza', !threw);
   const sOther = await state.get(other.id);
-  check('get() crea estado para usuario sin fila', sOther.userId === other.id && sOther.trendStatus === 'insufficient_data');
+  check(
+    'get() crea estado para usuario sin fila',
+    sOther.userId === other.id && sOther.trendStatus === 'insufficient_data',
+  );
 
   await prisma.$disconnect();
-  try { await pg.stop(); } catch { /* teardown */ }
-  try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    await pg.stop();
+  } catch {
+    /* teardown */
+  }
+  try {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 
   console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke UserNutritionState`);
   process.exit(failures === 0 ? 0 : 1);

@@ -67,7 +67,13 @@ export class OpenFoodFactsLookupProvider implements BarcodeLookupProvider {
   }
 
   private notFound(start: number): BarcodeLookupResult {
-    return { providerId: this.id, providerVersion: '1.0.0', found: false, product: null, latencyMs: Date.now() - start };
+    return {
+      providerId: this.id,
+      providerVersion: '1.0.0',
+      found: false,
+      product: null,
+      latencyMs: Date.now() - start,
+    };
   }
 }
 

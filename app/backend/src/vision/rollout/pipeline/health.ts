@@ -57,11 +57,20 @@ export function buildHealthReport(
     window,
     scans: scans.length,
     acceptanceRate: acceptance(scans),
-    undoRate: executed.length === 0 ? null : round4(executed.filter((d) => undoneScanIds.has(d.scanId)).length / executed.length),
+    undoRate:
+      executed.length === 0
+        ? null
+        : round4(executed.filter((d) => undoneScanIds.has(d.scanId)).length / executed.length),
     manualFallbackRate: rate(scans, (s) => s.status === 'FALLBACK_MANUAL'),
     providerFailureRate: rate(scans, (s) => s.status === 'FAILED' && isProviderFailure(s.failureReason)),
-    meanLatencyMs: mean(scans.map((s) => s.latencyMs).filter((x): x is number => x != null), 1),
-    p50LatencyMs: median(scans.map((s) => s.latencyMs).filter((x): x is number => x != null), 1),
+    meanLatencyMs: mean(
+      scans.map((s) => s.latencyMs).filter((x): x is number => x != null),
+      1,
+    ),
+    p50LatencyMs: median(
+      scans.map((s) => s.latencyMs).filter((x): x is number => x != null),
+      1,
+    ),
     meanScanConfidence: mean(scans.map((s) => s.scanConfidence).filter((x): x is number => x != null)),
     calibration: {
       currentEce: eceNow,

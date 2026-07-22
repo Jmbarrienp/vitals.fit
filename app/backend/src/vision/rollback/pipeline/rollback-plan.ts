@@ -1,6 +1,11 @@
 import { GovernanceRecommendation } from '../../governance/types/governance-contract';
 import { GatesReport, HealthReport, RiskAssessment, RolloutStatus } from '../../rollout/types/rollout-contract';
-import { HEALTH_MAX_ECE, HEALTH_MAX_PROVIDER_FAILURE_RATE, HEALTH_MAX_UNDO_RATE, isHealthGreen } from '../../rollout/pipeline/health';
+import {
+  HEALTH_MAX_ECE,
+  HEALTH_MAX_PROVIDER_FAILURE_RATE,
+  HEALTH_MAX_UNDO_RATE,
+  isHealthGreen,
+} from '../../rollout/pipeline/health';
 import { GATE_MAX_FALSE_POSITIVES } from '../../rollout/pipeline/gates';
 import { PromotionExecutionPlan } from '../../promotion/types/promotion-plan-contract';
 import {
@@ -91,7 +96,11 @@ export function buildRollbackPlan(
     degradedHealth,
     riskSummary: {
       overall: risk.overall,
-      dimensions: risk.dimensions.map((d) => ({ dimension: d.dimension, level: d.level, topEvidence: d.evidence[0] ?? '' })),
+      dimensions: risk.dimensions.map((d) => ({
+        dimension: d.dimension,
+        level: d.level,
+        topEvidence: d.evidence[0] ?? '',
+      })),
     },
     rollbackSteps: rollbackSteps(target, currentProvider),
     verificationChecklist: verificationChecklist(target, health),
@@ -128,7 +137,8 @@ function decideTarget(
       target: {
         kind: 'DISABLE_AUTO_ACCEPT',
         provider: null,
-        detail: 'contención inmediata y determinista: apagar AUTO_ACCEPT_ENABLED (el default de fábrica). No requiere historial y siempre está disponible.',
+        detail:
+          'contención inmediata y determinista: apagar AUTO_ACCEPT_ENABLED (el default de fábrica). No requiere historial y siempre está disponible.',
       },
       readiness: 'REQUIRED',
       blockingReasons: [],
@@ -149,7 +159,13 @@ function decideTarget(
   };
 }
 
-function deriveSeverity(anyTrigger: boolean, riskHigh: boolean, gateFired: boolean, health: HealthReport, drifting: boolean): RollbackSeverity {
+function deriveSeverity(
+  anyTrigger: boolean,
+  riskHigh: boolean,
+  gateFired: boolean,
+  health: HealthReport,
+  drifting: boolean,
+): RollbackSeverity {
   if (!anyTrigger) return 'NONE';
   if (riskHigh || (gateFired && health.falsePositives > 0)) return 'CRITICAL';
   if (gateFired) return 'HIGH';
@@ -178,22 +194,48 @@ function confidenceLabel(agreeingSignals: number): string {
   return 'BAJA';
 }
 
-function headline(anyTrigger: boolean, target: RollbackTarget, gateFired: boolean, drifting: boolean, riskHigh: boolean): string {
+function headline(
+  anyTrigger: boolean,
+  target: RollbackTarget,
+  gateFired: boolean,
+  drifting: boolean,
+  riskHigh: boolean,
+): string {
   if (!anyTrigger) return 'no se requiere rollback: la salud está en verde, sin deriva ni riesgo elevado';
   const causes: string[] = [];
   if (gateFired) causes.push('la puerta ROLLBACK_REQUIRED está disparada (salud degradada o falsos positivos)');
   if (drifting) causes.push('el incumbente está a la deriva (Governance recomienda DEMOTE)');
   if (riskHigh) causes.push('el riesgo global es HIGH');
-  const action = target.kind === 'DISABLE_AUTO_ACCEPT' ? 'apagar auto-accept' : target.kind === 'RESTORE_PROVIDER' ? 'restaurar un proveedor seguro' : 'ninguna acción';
+  const action =
+    target.kind === 'DISABLE_AUTO_ACCEPT'
+      ? 'apagar auto-accept'
+      : target.kind === 'RESTORE_PROVIDER'
+        ? 'restaurar un proveedor seguro'
+        : 'ninguna acción';
   return `Rollback indicado (${action}): ${causes.join('; ')}`;
 }
 
 function collectMetrics(health: HealthReport): TriggeringMetric[] {
   return [
     { metric: 'undoRate', observed: health.undoRate, threshold: HEALTH_MAX_UNDO_RATE, source: 'Health Engine (V4.0)' },
-    { metric: 'providerFailureRate', observed: health.providerFailureRate, threshold: HEALTH_MAX_PROVIDER_FAILURE_RATE, source: 'Health Engine (V4.0)' },
-    { metric: 'calibrationEce', observed: health.calibration.currentEce, threshold: HEALTH_MAX_ECE, source: 'Calibration via Health (V4.0)' },
-    { metric: 'falsePositives', observed: health.falsePositives, threshold: GATE_MAX_FALSE_POSITIVES, source: 'Gates Engine (V4.0)' },
+    {
+      metric: 'providerFailureRate',
+      observed: health.providerFailureRate,
+      threshold: HEALTH_MAX_PROVIDER_FAILURE_RATE,
+      source: 'Health Engine (V4.0)',
+    },
+    {
+      metric: 'calibrationEce',
+      observed: health.calibration.currentEce,
+      threshold: HEALTH_MAX_ECE,
+      source: 'Calibration via Health (V4.0)',
+    },
+    {
+      metric: 'falsePositives',
+      observed: health.falsePositives,
+      threshold: GATE_MAX_FALSE_POSITIVES,
+      source: 'Gates Engine (V4.0)',
+    },
     { metric: 'falseNegatives', observed: health.falseNegatives, threshold: null, source: 'Health Engine (V4.0)' },
   ];
 }
@@ -207,7 +249,9 @@ function collectEvidence(
   const out: string[] = [];
   if (rollbackGate?.reasons) out.push(...rollbackGate.reasons);
   if (governance.evidence.incumbentDrift === 'DRIFTING' || governance.action === 'DEMOTE') {
-    out.push(`Governance: acción ${governance.action}, deriva del incumbente ${governance.evidence.incumbentDrift} — ${governance.reasons[0] ?? ''}`);
+    out.push(
+      `Governance: acción ${governance.action}, deriva del incumbente ${governance.evidence.incumbentDrift} — ${governance.reasons[0] ?? ''}`,
+    );
   }
   if (riskHigh) {
     const worst = risk.dimensions.find((d) => d.level === 'HIGH');
@@ -219,21 +263,76 @@ function collectEvidence(
 function rollbackSteps(target: RollbackTarget, currentProvider: string): RollbackStep[] {
   if (target.kind === 'DISABLE_AUTO_ACCEPT') {
     return [
-      { order: 1, action: 'Contener', detail: 'fijar AUTO_ACCEPT_ENABLED=false para detener el registro autónomo de inmediato', owner: 'ON_CALL' },
-      { order: 2, action: 'Verificar', detail: 'confirmar que no se generan nuevas auto-aceptaciones (los scans vuelven a pedir confirmación)', owner: 'ON_CALL' },
-      { order: 3, action: 'Preservar evidencia', detail: 'conservar VisionTrustDecision y VisionFeedback — son append-only y son el corpus del diagnóstico', owner: 'ML' },
-      { order: 4, action: 'Diagnosticar', detail: 'identificar la causa raíz de la degradación (¿undo spike? ¿falsos positivos? ¿deriva de calibración?)', owner: 'ML' },
-      { order: 5, action: 'Post-mortem', detail: 'documentar qué criterio de salud disparó y por qué la graduación no lo anticipó', owner: 'PRODUCT' },
+      {
+        order: 1,
+        action: 'Contener',
+        detail: 'fijar AUTO_ACCEPT_ENABLED=false para detener el registro autónomo de inmediato',
+        owner: 'ON_CALL',
+      },
+      {
+        order: 2,
+        action: 'Verificar',
+        detail: 'confirmar que no se generan nuevas auto-aceptaciones (los scans vuelven a pedir confirmación)',
+        owner: 'ON_CALL',
+      },
+      {
+        order: 3,
+        action: 'Preservar evidencia',
+        detail: 'conservar VisionTrustDecision y VisionFeedback — son append-only y son el corpus del diagnóstico',
+        owner: 'ML',
+      },
+      {
+        order: 4,
+        action: 'Diagnosticar',
+        detail: 'identificar la causa raíz de la degradación (¿undo spike? ¿falsos positivos? ¿deriva de calibración?)',
+        owner: 'ML',
+      },
+      {
+        order: 5,
+        action: 'Post-mortem',
+        detail: 'documentar qué criterio de salud disparó y por qué la graduación no lo anticipó',
+        owner: 'PRODUCT',
+      },
     ];
   }
   if (target.kind === 'RESTORE_PROVIDER') {
     return [
-      { order: 1, action: 'Confirmar objetivo', detail: `el operador confirma el último proveedor bueno conocido (piso seguro: '${target.provider}')`, owner: 'ENGINEERING' },
-      { order: 2, action: 'Congelar rollout', detail: 'detener cualquier avance de tráfico en curso', owner: 'ON_CALL' },
-      { order: 3, action: 'Restaurar', detail: `fijar VISION_PROVIDER al objetivo confirmado y redesplegar`, owner: 'ENGINEERING' },
-      { order: 4, action: 'Verificar recuperación', detail: 'confirmar que la tasa de fallos y la calibración vuelven a rangos verdes', owner: 'ON_CALL' },
-      { order: 5, action: 'Preservar evidencia', detail: `conservar las corridas en sombra de '${currentProvider}' — evidencia append-only para el diagnóstico`, owner: 'ML' },
-      { order: 6, action: 'Post-mortem', detail: 'documentar la deriva y por qué la evidencia previa a la promoción no la anticipó', owner: 'PRODUCT' },
+      {
+        order: 1,
+        action: 'Confirmar objetivo',
+        detail: `el operador confirma el último proveedor bueno conocido (piso seguro: '${target.provider}')`,
+        owner: 'ENGINEERING',
+      },
+      {
+        order: 2,
+        action: 'Congelar rollout',
+        detail: 'detener cualquier avance de tráfico en curso',
+        owner: 'ON_CALL',
+      },
+      {
+        order: 3,
+        action: 'Restaurar',
+        detail: `fijar VISION_PROVIDER al objetivo confirmado y redesplegar`,
+        owner: 'ENGINEERING',
+      },
+      {
+        order: 4,
+        action: 'Verificar recuperación',
+        detail: 'confirmar que la tasa de fallos y la calibración vuelven a rangos verdes',
+        owner: 'ON_CALL',
+      },
+      {
+        order: 5,
+        action: 'Preservar evidencia',
+        detail: `conservar las corridas en sombra de '${currentProvider}' — evidencia append-only para el diagnóstico`,
+        owner: 'ML',
+      },
+      {
+        order: 6,
+        action: 'Post-mortem',
+        detail: 'documentar la deriva y por qué la evidencia previa a la promoción no la anticipó',
+        owner: 'PRODUCT',
+      },
     ];
   }
   return [];
@@ -241,27 +340,98 @@ function rollbackSteps(target: RollbackTarget, currentProvider: string): Rollbac
 
 function verificationChecklist(target: RollbackTarget, health: HealthReport): ChecklistItem[] {
   const items: ChecklistItem[] = [
-    item('SAFETY', 'Contención aplicada', 'PENDING',
-      target.kind === 'DISABLE_AUTO_ACCEPT' ? 'AUTO_ACCEPT_ENABLED=false confirmado' : target.kind === 'RESTORE_PROVIDER' ? 'VISION_PROVIDER restaurado al objetivo confirmado' : 'sin acción requerida', 'CRITICAL', 'ON_CALL'),
-    item('MONITORING', 'Tasa de undo recuperándose', metricStatus(health.undoRate, HEALTH_MAX_UNDO_RATE),
-      `undo actual ${pct(health.undoRate)} vs umbral ${pct(HEALTH_MAX_UNDO_RATE)}`, 'HIGH', 'ON_CALL'),
-    item('MONITORING', 'Fallos de proveedor bajo umbral', metricStatus(health.providerFailureRate, HEALTH_MAX_PROVIDER_FAILURE_RATE),
-      `fallos ${pct(health.providerFailureRate)} vs umbral ${pct(HEALTH_MAX_PROVIDER_FAILURE_RATE)}`, 'HIGH', 'ON_CALL'),
-    item('MONITORING', 'Sin nuevos falsos positivos', health.falsePositives > 0 ? 'FAIL' : 'PASS',
-      `${health.falsePositives} falsos positivos en la ventana`, 'CRITICAL', 'ML'),
-    item('TECHNICAL', 'Evidencia preservada', 'PENDING', 'VisionTrustDecision / VisionFeedback / VisionShadowRun intactas (append-only)', 'MEDIUM', 'ML'),
+    item(
+      'SAFETY',
+      'Contención aplicada',
+      'PENDING',
+      target.kind === 'DISABLE_AUTO_ACCEPT'
+        ? 'AUTO_ACCEPT_ENABLED=false confirmado'
+        : target.kind === 'RESTORE_PROVIDER'
+          ? 'VISION_PROVIDER restaurado al objetivo confirmado'
+          : 'sin acción requerida',
+      'CRITICAL',
+      'ON_CALL',
+    ),
+    item(
+      'MONITORING',
+      'Tasa de undo recuperándose',
+      metricStatus(health.undoRate, HEALTH_MAX_UNDO_RATE),
+      `undo actual ${pct(health.undoRate)} vs umbral ${pct(HEALTH_MAX_UNDO_RATE)}`,
+      'HIGH',
+      'ON_CALL',
+    ),
+    item(
+      'MONITORING',
+      'Fallos de proveedor bajo umbral',
+      metricStatus(health.providerFailureRate, HEALTH_MAX_PROVIDER_FAILURE_RATE),
+      `fallos ${pct(health.providerFailureRate)} vs umbral ${pct(HEALTH_MAX_PROVIDER_FAILURE_RATE)}`,
+      'HIGH',
+      'ON_CALL',
+    ),
+    item(
+      'MONITORING',
+      'Sin nuevos falsos positivos',
+      health.falsePositives > 0 ? 'FAIL' : 'PASS',
+      `${health.falsePositives} falsos positivos en la ventana`,
+      'CRITICAL',
+      'ML',
+    ),
+    item(
+      'TECHNICAL',
+      'Evidencia preservada',
+      'PENDING',
+      'VisionTrustDecision / VisionFeedback / VisionShadowRun intactas (append-only)',
+      'MEDIUM',
+      'ML',
+    ),
   ];
   return items;
 }
 
 function postRollbackChecklist(target: RollbackTarget): ChecklistItem[] {
   return [
-    item('OPERATIONAL', 'Estado estable declarado', 'PENDING', 'salud en verde sostenida durante al menos una ventana completa tras el rollback', 'HIGH', 'ON_CALL'),
-    item('STATISTICAL', 'Causa raíz identificada', 'PENDING', 'el diagnóstico explica qué señal disparó y por qué la evidencia previa no la anticipó', 'HIGH', 'ML'),
-    item('PRODUCT', 'Impacto en usuario evaluado', 'PENDING', 'cuantificar cuántos usuarios/comidas se vieron afectados durante la degradación', 'MEDIUM', 'PRODUCT'),
-    item('TECHNICAL', 'Guardas reforzadas', 'PENDING',
-      target.kind === 'DISABLE_AUTO_ACCEPT' ? 'revisar si los umbrales de graduación de auto-accept necesitan endurecerse' : 'revisar si la barra de promoción necesita endurecerse', 'MEDIUM', 'ENGINEERING'),
-    item('SAFETY', 'Post-mortem sin culpa completado', 'PENDING', 'documento compartido con el criterio de retry acordado', 'HIGH', 'PRODUCT'),
+    item(
+      'OPERATIONAL',
+      'Estado estable declarado',
+      'PENDING',
+      'salud en verde sostenida durante al menos una ventana completa tras el rollback',
+      'HIGH',
+      'ON_CALL',
+    ),
+    item(
+      'STATISTICAL',
+      'Causa raíz identificada',
+      'PENDING',
+      'el diagnóstico explica qué señal disparó y por qué la evidencia previa no la anticipó',
+      'HIGH',
+      'ML',
+    ),
+    item(
+      'PRODUCT',
+      'Impacto en usuario evaluado',
+      'PENDING',
+      'cuantificar cuántos usuarios/comidas se vieron afectados durante la degradación',
+      'MEDIUM',
+      'PRODUCT',
+    ),
+    item(
+      'TECHNICAL',
+      'Guardas reforzadas',
+      'PENDING',
+      target.kind === 'DISABLE_AUTO_ACCEPT'
+        ? 'revisar si los umbrales de graduación de auto-accept necesitan endurecerse'
+        : 'revisar si la barra de promoción necesita endurecerse',
+      'MEDIUM',
+      'ENGINEERING',
+    ),
+    item(
+      'SAFETY',
+      'Post-mortem sin culpa completado',
+      'PENDING',
+      'documento compartido con el criterio de retry acordado',
+      'HIGH',
+      'PRODUCT',
+    ),
   ];
 }
 
@@ -307,15 +477,22 @@ function retryConditions(promotion: PromotionExecutionPlan): string[] {
 function estimatedImpact(target: RollbackTarget, health: HealthReport): string[] {
   const out: string[] = [];
   if (target.kind === 'DISABLE_AUTO_ACCEPT') {
-    out.push('los usuarios vuelven a confirmar cada scan manualmente (la experiencia pre-V3.6, nunca peor que el registro manual)');
-    out.push('la graduación de auto-accept se pausa; la confianza acumulada por usuario se conserva (vive en VisionFeedback)');
+    out.push(
+      'los usuarios vuelven a confirmar cada scan manualmente (la experiencia pre-V3.6, nunca peor que el registro manual)',
+    );
+    out.push(
+      'la graduación de auto-accept se pausa; la confianza acumulada por usuario se conserva (vive en VisionFeedback)',
+    );
   } else if (target.kind === 'RESTORE_PROVIDER') {
-    out.push('cada scan futuro pasa por el proveedor restaurado; la curva de calibración del proveedor degradado se descarta');
+    out.push(
+      'cada scan futuro pasa por el proveedor restaurado; la curva de calibración del proveedor degradado se descarta',
+    );
     out.push('la confianza ganada por usuario sobre cada alimento se conserva (es provider-independiente)');
   } else {
     out.push('sin impacto — no se requiere rollback');
   }
-  if (health.falsePositives > 0) out.push(`${health.falsePositives} auto-aceptaciones ya deshechas por usuarios durante la degradación`);
+  if (health.falsePositives > 0)
+    out.push(`${health.falsePositives} auto-aceptaciones ya deshechas por usuarios durante la degradación`);
   return out;
 }
 

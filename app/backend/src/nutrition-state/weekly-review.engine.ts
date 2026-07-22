@@ -105,7 +105,13 @@ export function commitmentOutcomesForWeek(weekStart: string, recs: LedgerRec[]):
  * and whether past interventions worked. `entries` are newest-first.
  */
 export function buildFollowUp(entries: WeeklyLedgerEntry[], recs: LedgerRec[]): FollowUp {
-  const empty: FollowUp = { resolved: [], persisting: [], emerged: [], successfulInterventions: 0, repeatedFailures: 0 };
+  const empty: FollowUp = {
+    resolved: [],
+    persisting: [],
+    emerged: [],
+    successfulInterventions: 0,
+    repeatedFailures: 0,
+  };
   if (entries.length === 0) return empty;
 
   const issueSets = entries.map(deriveIssueSet);
@@ -129,13 +135,23 @@ export function buildFollowUp(entries: WeeklyLedgerEntry[], recs: LedgerRec[]): 
 
   const persisting: IssueFollowUp[] = current
     .filter((i) => prior.includes(i))
-    .map((issue) => ({ issue, weeksActive: weeksActive(issue, 0), status: 'PERSISTING', intervention: intervention(issue) }));
+    .map((issue) => ({
+      issue,
+      weeksActive: weeksActive(issue, 0),
+      status: 'PERSISTING',
+      intervention: intervention(issue),
+    }));
   const emerged: IssueFollowUp[] = current
     .filter((i) => !prior.includes(i))
     .map((issue) => ({ issue, weeksActive: 1, status: 'NEW', intervention: intervention(issue) }));
   const resolved: IssueFollowUp[] = prior
     .filter((i) => !current.includes(i))
-    .map((issue) => ({ issue, weeksActive: weeksActive(issue, 1), status: 'RESOLVED', intervention: intervention(issue) }));
+    .map((issue) => ({
+      issue,
+      weeksActive: weeksActive(issue, 1),
+      status: 'RESOLVED',
+      intervention: intervention(issue),
+    }));
 
   const successfulInterventions = resolved.filter((i) => i.intervention === 'INTERVENED').length;
   const repeatedFailures = persisting.filter((i) => i.intervention === 'INTERVENED').length;
@@ -193,15 +209,17 @@ export function buildReview(
 }
 
 /** Product-intelligence metrics. Read-only; does NOT feed recommendation generation. */
-export function computeRetention(entries: WeeklyLedgerEntry[], recs: LedgerRec[], followUp: FollowUp): RetentionMetrics {
+export function computeRetention(
+  entries: WeeklyLedgerEntry[],
+  recs: LedgerRec[],
+  followUp: FollowUp,
+): RetentionMetrics {
   const generated = recs.length;
   const committed = recs.filter((r) => r.committedAt !== null).length;
   const completed = recs.filter((r) => r.completedAt !== null).length;
   const totalInterventions = followUp.successfulInterventions + followUp.repeatedFailures;
 
-  const consistency = entries.length
-    ? avg(entries.map((e) => Math.min(1, e.daysLogged / 7)))
-    : null;
+  const consistency = entries.length ? avg(entries.map((e) => Math.min(1, e.daysLogged / 7))) : null;
 
   // adherenceScore deltas across consecutive weeks (entries are newest-first).
   const deltas: number[] = [];

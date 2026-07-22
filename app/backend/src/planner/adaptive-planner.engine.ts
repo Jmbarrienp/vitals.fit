@@ -33,7 +33,6 @@ const FAST_GAIN_KG_WK = 0.55; // gaining faster than a lean bulk
 const PLATEAU_CUT_KCAL = -200; // aligned with the engine's reactive plateau cut
 const SAFETY_BUMP_KCAL = 100; // aligned with the engine's reactive protective bump
 const GAIN_TRIM_KCAL = -150; // trim an overly fast bulk
-const PROTEIN_LOW_RATIO = 0.9; // avgProtein below 90% of target = "low" that week
 const PROTEIN_WELL_BELOW_RATIO = 0.6; // chronically far below -> target may be impractical
 const PROTEIN_BUMP_G = 15; // protein target change magnitude
 const CALORIE_REVIEW_DAYS = 14; // don't re-cut before two weeks
@@ -78,8 +77,7 @@ export function decidePlan(ctx: CoachingContext): NutritionPlan {
 
   const decisions: PlanDecision[] = [calories, protein, ...(intervention ? [intervention] : [])];
 
-  const adherenceFirst =
-    calories.code === 'KEEP_PLAN' && calories.evidence.some((e) => e.code === 'LOW_ADHERENCE');
+  const adherenceFirst = calories.code === 'KEEP_PLAN' && calories.evidence.some((e) => e.code === 'LOW_ADHERENCE');
   const changes = decisions.filter((d) => isChange(d.code));
 
   let posture: PlanPosture;
@@ -230,7 +228,10 @@ function decideCalories(a: Analysis, ctx: CoachingContext): PlanDecision {
           'CALORIES',
           a.stalledStreak >= STALL_WEEKS_HIGH_CONF ? 'HIGH' : 'MEDIUM',
           `Tu ganancia lleva ${a.stalledStreak} semanas detenida con buena adherencia. Subir ${SAFETY_BUMP_KCAL} kcal (a ${target + SAFETY_BUMP_KCAL}) reactiva el progreso.`,
-          [ev('GAIN_STALLED', `${a.stalledStreak} semanas sin ganancia`), ev('HIGH_ADHERENCE', `adherencia ${round(a.avgAdherence)}/100`)],
+          [
+            ev('GAIN_STALLED', `${a.stalledStreak} semanas sin ganancia`),
+            ev('HIGH_ADHERENCE', `adherencia ${round(a.avgAdherence)}/100`),
+          ],
           { calorieDelta: SAFETY_BUMP_KCAL, newCalorieTarget: target + SAFETY_BUMP_KCAL },
           CALORIE_REVIEW_DAYS,
         );
@@ -240,7 +241,10 @@ function decideCalories(a: Analysis, ctx: CoachingContext): PlanDecision {
         'CALORIES',
         'MEDIUM',
         'Tu ganancia está detenida, pero primero necesitas más consistencia antes de subir calorías. Mantén el plan y mejora la adherencia.',
-        [ev('GAIN_STALLED', `${a.stalledStreak} semanas`), ev('LOW_ADHERENCE', `adherencia ${a.avgAdherence === null ? '—' : round(a.avgAdherence)}/100`)],
+        [
+          ev('GAIN_STALLED', `${a.stalledStreak} semanas`),
+          ev('LOW_ADHERENCE', `adherencia ${a.avgAdherence === null ? '—' : round(a.avgAdherence)}/100`),
+        ],
         null,
         WEEKLY_REVIEW_DAYS,
       );
@@ -280,7 +284,10 @@ function decideProtein(a: Analysis, ctx: CoachingContext, calories: PlanDecision
       'PROTEIN',
       'MEDIUM',
       `Vienes cumpliendo el plan pero tu proteína quedó muy por debajo de la meta ${a.proteinWellBelowStreak} semanas seguidas. Bajar la meta a ${newTarget}g la hace alcanzable sin castigar tu adherencia.`,
-      [ev('PROTEIN_TARGET_UNREACHABLE', `${a.proteinWellBelowStreak} semanas por debajo del 60% de ${target}g`), ev('HIGH_ADHERENCE', `adherencia ${round(a.avgAdherence)}/100`)],
+      [
+        ev('PROTEIN_TARGET_UNREACHABLE', `${a.proteinWellBelowStreak} semanas por debajo del 60% de ${target}g`),
+        ev('HIGH_ADHERENCE', `adherencia ${round(a.avgAdherence)}/100`),
+      ],
       { proteinDelta: -PROTEIN_BUMP_G, newProteinTarget: newTarget },
       CALORIE_REVIEW_DAYS,
     );
@@ -295,7 +302,15 @@ function decideProtein(a: Analysis, ctx: CoachingContext, calories: PlanDecision
       'PROTEIN',
       'MEDIUM',
       `Al bajar calorías, subir la proteína a ${newTarget}g protege tu masa muscular en el déficit más profundo.`,
-      [ev('DEFICIT_DEEPENING', `recorte de ${Math.abs(PLATEAU_CUT_KCAL)} kcal`), ev('PROTEIN_HAS_ROOM', a.recentAvgProtein === null ? 'proteína no elevada' : `promedio ${round(a.recentAvgProtein)}g vs meta ${target}g`)],
+      [
+        ev('DEFICIT_DEEPENING', `recorte de ${Math.abs(PLATEAU_CUT_KCAL)} kcal`),
+        ev(
+          'PROTEIN_HAS_ROOM',
+          a.recentAvgProtein === null
+            ? 'proteína no elevada'
+            : `promedio ${round(a.recentAvgProtein)}g vs meta ${target}g`,
+        ),
+      ],
       { proteinDelta: PROTEIN_BUMP_G, newProteinTarget: newTarget },
       CALORIE_REVIEW_DAYS,
     );
@@ -323,7 +338,12 @@ function decideIntervention(ctx: CoachingContext): PlanDecision | null {
       'INTERVENTION',
       persistingIntervened.weeksActive >= 3 ? 'HIGH' : 'MEDIUM',
       `"${persistingIntervened.issue}" sigue presente ${persistingIntervened.weeksActive} semanas pese a que cumpliste el compromiso: el enfoque actual no funciona para ti. Cambia de intervención.`,
-      [ev('INTERVENTION_FAILED', `${persistingIntervened.issue} persiste ${persistingIntervened.weeksActive} semanas pese a intervención`)],
+      [
+        ev(
+          'INTERVENTION_FAILED',
+          `${persistingIntervened.issue} persiste ${persistingIntervened.weeksActive} semanas pese a intervención`,
+        ),
+      ],
       null,
       CALORIE_REVIEW_DAYS,
     );
@@ -336,7 +356,12 @@ function decideIntervention(ctx: CoachingContext): PlanDecision | null {
       'INTERVENTION',
       'MEDIUM',
       `"${persisting.issue}" sigue abierto; dale más tiempo a la intervención actual y vuelve a evaluar la próxima semana.`,
-      [ev('ISSUE_PERSISTING', `${persisting.issue} (${persisting.weeksActive} semana(s), intervención=${persisting.intervention})`)],
+      [
+        ev(
+          'ISSUE_PERSISTING',
+          `${persisting.issue} (${persisting.weeksActive} semana(s), intervención=${persisting.intervention})`,
+        ),
+      ],
       null,
       WEEKLY_REVIEW_DAYS,
     );

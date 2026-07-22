@@ -72,7 +72,10 @@ export function decideAutoAccept(input: AutoAcceptInput): AutoAcceptDecision {
     return deny('REVIEW_REQUIRED', input.trust.reasons[0] ?? 'sin confianza acumulada todavía');
   }
   if (!input.allCandidatesGraduated) {
-    return deny('REVIEW_REQUIRED', 'algún alimento del plato aún no está graduado — un plato vale lo que su alimento menos conocido');
+    return deny(
+      'REVIEW_REQUIRED',
+      'algún alimento del plato aún no está graduado — un plato vale lo que su alimento menos conocido',
+    );
   }
   if (input.trust.evidence.confirmations < minimum) {
     return deny(
@@ -81,7 +84,10 @@ export function decideAutoAccept(input: AutoAcceptInput): AutoAcceptDecision {
     );
   }
   if (input.trust.level !== 'HIGH') {
-    return deny('REVIEW_REQUIRED', `confianza ${input.trust.level} (${pct(input.trust.score)}) — aún no alcanza para aceptar solo`);
+    return deny(
+      'REVIEW_REQUIRED',
+      `confianza ${input.trust.level} (${pct(input.trust.score)}) — aún no alcanza para aceptar solo`,
+    );
   }
   if (input.calibratedConfidence == null) {
     return deny('REVIEW_REQUIRED', 'el proveedor aún no tiene curva de calibración con evidencia en esta banda');

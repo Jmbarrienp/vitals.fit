@@ -84,9 +84,7 @@ export function deriveState(i: DeriveInput): DerivedState {
   const adherencePctShort = computeAdherence(i.windowShortAll);
 
   const totalMealsShort = loggedShort.reduce((acc, l) => acc + l.loggedMeals.length, 0);
-  const avgMealsPerDay = loggedShort.length
-    ? Math.round((totalMealsShort / loggedShort.length) * 10) / 10
-    : null;
+  const avgMealsPerDay = loggedShort.length ? Math.round((totalMealsShort / loggedShort.length) * 10) / 10 : null;
 
   const trend = computeWeightTrend(i.weights30.map((w) => ({ date: w.date, weightKg: w.weightKg })));
   const trendStatus = classifyTrend(i.goalType, trend.weeklyRateKg, trend.points);
@@ -132,8 +130,7 @@ export function deriveState(i: DeriveInput): DerivedState {
     weekendDays: logged30.filter((l) => isWeekend(l.date)).length,
     weekdayDays: logged30.filter((l) => !isWeekend(l.date)).length,
     breakfastRate: loggedShort.length
-      ? loggedShort.filter((l) => l.loggedMeals.some((m) => m.mealType === 'BREAKFAST')).length /
-        loggedShort.length
+      ? loggedShort.filter((l) => l.loggedMeals.some((m) => m.mealType === 'BREAKFAST')).length / loggedShort.length
       : null,
   });
   const plateauStatus = classifyPlateau({
@@ -218,9 +215,7 @@ export function streakEndingAt<T extends { date: Date }>(
 }
 
 /** 0..100 over days that have been evaluated (mirrors the legacy context-builder logic). */
-function computeAdherence(
-  logs: Array<{ adherencePct: number | null; planFollowed: boolean | null }>,
-): number | null {
+function computeAdherence(logs: Array<{ adherencePct: number | null; planFollowed: boolean | null }>): number | null {
   const evaluated = logs.filter((l) => l.planFollowed !== null);
   if (evaluated.length === 0) return null;
   const sum = evaluated.reduce((acc, l) => {
@@ -319,11 +314,7 @@ function classifyPlateau(p: {
   if (p.weightDataPoints < MIN_WEIGHT_POINTS || p.adherenceScore === null) {
     return PlateauStatus.INSUFFICIENT_DATA;
   }
-  if (
-    p.goalType === 'LOSE_FAT' &&
-    p.trendStatus === 'stalled' &&
-    p.adherenceScore >= PLATEAU_ADHERENCE_MIN
-  ) {
+  if (p.goalType === 'LOSE_FAT' && p.trendStatus === 'stalled' && p.adherenceScore >= PLATEAU_ADHERENCE_MIN) {
     return PlateauStatus.PLATEAU_SUSPECTED;
   }
   return PlateauStatus.NONE;

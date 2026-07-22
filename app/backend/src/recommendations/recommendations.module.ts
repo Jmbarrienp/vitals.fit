@@ -9,11 +9,7 @@ import { RecommendationListener } from './listeners/recommendation.listener';
 
 @Module({
   imports: [AiModule, PushModule, NutritionStateModule],
-  providers: [
-    RecommendationsService,
-    RecommendationService,
-    RecommendationListener,
-  ],
+  providers: [RecommendationsService, RecommendationService, RecommendationListener],
   controllers: [RecommendationsController],
   exports: [RecommendationsService],
 })

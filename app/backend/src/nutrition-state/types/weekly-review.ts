@@ -8,12 +8,7 @@
 
 /** Ledger metrics the review compares week-over-week (all "higher is better"). */
 export type ReviewMetric =
-  | 'adherenceScore'
-  | 'nutritionScore'
-  | 'loggingStreak'
-  | 'proteinStreakDays'
-  | 'calorieStreakDays'
-  | 'daysLogged';
+  'adherenceScore' | 'nutritionScore' | 'loggingStreak' | 'proteinStreakDays' | 'calorieStreakDays' | 'daysLogged';
 
 export interface MetricDelta {
   metric: ReviewMetric;

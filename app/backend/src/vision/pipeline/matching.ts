@@ -18,7 +18,6 @@ export interface MatchResult {
 
 const MAX_ALTERNATES = 3;
 /** The adapter's internal score can exceed 100 (favorite boost); this just normalizes for the contract. */
-const SCORE_NORMALIZER = 130;
 
 export function matchDetection(detection: Detection, searchResults: NormalizedFood[]): MatchResult {
   if (searchResults.length === 0) {

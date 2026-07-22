@@ -50,7 +50,10 @@ export function buildComparisonReport(
     overall: verdict('overall', outcomes),
     perModality: bucketed(outcomes, (o) => o.source),
     perFood: bucketed(outcomes, (o) => o.foodName ?? 'sin-nombre'),
-    perCuisine: bucketed(outcomes.filter((o) => o.cuisine), (o) => o.cuisine!),
+    perCuisine: bucketed(
+      outcomes.filter((o) => o.cuisine),
+      (o) => o.cuisine!,
+    ),
     perConfidenceBand: bucketed(outcomes, (o) => o.confidenceBand),
     perUserSegment: bucketed(outcomes, (o) => o.userId),
     operations,
@@ -81,7 +84,8 @@ export function verdict(bucket: string, outcomes: PairedOutcome[]): PairedVerdic
   const discordant = incumbentOnly + challengerOnly;
 
   // McNemar on the discordant pairs only. Positive z favours the challenger.
-  const mcNemarZ = discordant >= MIN_DISCORDANT_PAIRS ? round4((challengerOnly - incumbentOnly) / Math.sqrt(discordant)) : null;
+  const mcNemarZ =
+    discordant >= MIN_DISCORDANT_PAIRS ? round4((challengerOnly - incumbentOnly) / Math.sqrt(discordant)) : null;
 
   const incumbent = sideMetrics(outcomes.map((o) => o.incumbent));
   const challenger = sideMetrics(outcomes.map((o) => o.challenger));
@@ -99,13 +103,34 @@ export function verdict(bucket: string, outcomes: PairedOutcome[]): PairedVerdic
   // AND there were enough disagreements to have measured anything at all.
   const significant = top1DeltaCi != null && top1DeltaCi.low > 0 && mcNemarZ != null && mcNemarZ > 0;
 
-  return { bucket, n, incumbent, challenger, incumbentOnly, challengerOnly, mcNemarZ, top1Delta, top1DeltaCi, significant };
+  return {
+    bucket,
+    n,
+    incumbent,
+    challenger,
+    incumbentOnly,
+    challengerOnly,
+    mcNemarZ,
+    top1Delta,
+    top1DeltaCi,
+    significant,
+  };
 }
 
 export function sideMetrics(sides: SideOutcome[]): SideMetrics {
   const n = sides.length;
   if (n === 0) {
-    return { n: 0, top1Accuracy: null, top3Accuracy: null, precision: null, recall: null, swapRate: null, missRate: null, medianPortionErrorPct: null, meanPortionErrorPct: null };
+    return {
+      n: 0,
+      top1Accuracy: null,
+      top3Accuracy: null,
+      precision: null,
+      recall: null,
+      swapRate: null,
+      missRate: null,
+      medianPortionErrorPct: null,
+      meanPortionErrorPct: null,
+    };
   }
   const proposed = sides.filter((s) => !s.missed); // it put something forward
   const errors = sides.map((s) => s.portionErrorPct).filter((x): x is number => x != null);

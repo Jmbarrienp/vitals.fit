@@ -171,7 +171,8 @@ function deriveAdaptations(
   nutritionScore: number | null,
   goalDir: string,
 ): Adaptations {
-  const proteinToBreakfast = flags.includes('PROTEIN_CHRONIC_LOW') || plan.decisions.some((d) => d.code === 'INCREASE_PROTEIN');
+  const proteinToBreakfast =
+    flags.includes('PROTEIN_CHRONIC_LOW') || plan.decisions.some((d) => d.code === 'INCREASE_PROTEIN');
   const simpler =
     plan.posture === 'ADHERENCE_FIRST' ||
     flags.includes('LOW_LOGGING_CONSISTENCY') ||
@@ -225,7 +226,10 @@ function composeMeal(
     const remaining = kcalTarget - sum(items, (it) => it.calories);
     if (remaining > MIN_FILL_KCAL) {
       const carbSources = pool
-        .filter((c) => c.carb100 >= CARB_DENSITY_MIN && c.prot100 < PROTEIN_DENSITY_MIN && !items.some((it) => it.foodId === c.id))
+        .filter(
+          (c) =>
+            c.carb100 >= CARB_DENSITY_MIN && c.prot100 < PROTEIN_DENSITY_MIN && !items.some((it) => it.foodId === c.id),
+        )
         .sort(byPriorityThen((c) => -c.carb100));
       const carb = pickPreferUnused(carbSources, usedIds);
       if (carb) {
@@ -308,7 +312,8 @@ function buildSummary(
   if (adapt.proteinToBreakfast) notes.push('más proteína en el desayuno');
   if (adapt.simpler) notes.push('estructura simplificada para sostener la adherencia');
   if (adapt.lighter) notes.push('comidas más ligeras');
-  const coverage = totalItems > 0 ? ` ${fromUserFoods}/${totalItems} porciones vienen de alimentos que ya consumes.` : '';
+  const coverage =
+    totalItems > 0 ? ` ${fromUserFoods}/${totalItems} porciones vienen de alimentos que ya consumes.` : '';
   return notes.length > 0 ? `${base} Ajustes: ${notes.join(', ')}.${coverage}` : `${base}${coverage}`;
 }
 

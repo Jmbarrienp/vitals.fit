@@ -61,7 +61,8 @@ export class GovernanceEngine {
     });
     if (rows.length === 0) return null;
     // Deterministic: most evidence wins, ties broken alphabetically.
-    return rows.sort((a, b) => b._count.providerId - a._count.providerId || a.providerId.localeCompare(b.providerId))[0].providerId;
+    return rows.sort((a, b) => b._count.providerId - a._count.providerId || a.providerId.localeCompare(b.providerId))[0]
+      .providerId;
   }
 
   /**
@@ -124,7 +125,11 @@ export class GovernanceEngine {
           confidenceBand: bandOf(example.candidateConfidence),
           confirmedFoodItemId: example.confirmedFoodItemId,
           incumbent: score(incumbentCandidate, example.confirmedFoodItemId, example.confirmedGrams),
-          challenger: score(bestFor(challengerCandidates, example.confirmedFoodItemId), example.confirmedFoodItemId, example.confirmedGrams),
+          challenger: score(
+            bestFor(challengerCandidates, example.confirmedFoodItemId),
+            example.confirmedFoodItemId,
+            example.confirmedGrams,
+          ),
         });
       }
     }
@@ -145,8 +150,16 @@ export class GovernanceEngine {
       {
         incumbentMeanLatencyMs: mean(incumbentScans.map((s) => s.latencyMs).filter(isNum)),
         challengerMeanLatencyMs: mean(completed.map((r) => r.latencyMs).filter(isNum)),
-        incumbentMeanTokens: mean(incumbentScans.filter((s) => s.tokensIn != null || s.tokensOut != null).map((s) => (s.tokensIn ?? 0) + (s.tokensOut ?? 0))),
-        challengerMeanTokens: mean(completed.filter((r) => r.tokensIn != null || r.tokensOut != null).map((r) => (r.tokensIn ?? 0) + (r.tokensOut ?? 0))),
+        incumbentMeanTokens: mean(
+          incumbentScans
+            .filter((s) => s.tokensIn != null || s.tokensOut != null)
+            .map((s) => (s.tokensIn ?? 0) + (s.tokensOut ?? 0)),
+        ),
+        challengerMeanTokens: mean(
+          completed
+            .filter((r) => r.tokensIn != null || r.tokensOut != null)
+            .map((r) => (r.tokensIn ?? 0) + (r.tokensOut ?? 0)),
+        ),
         challengerAvailability: shadowRuns.length === 0 ? null : round4(completed.length / shadowRuns.length),
       },
       { from, to },
@@ -187,7 +200,10 @@ export class GovernanceEngine {
       where: { createdAt: { gte: from, lte: to } },
       select: { providerId: true, status: true, source: true, latencyMs: true },
     });
-    const byProvider: Record<string, { total: number; completed: number; failed: number; meanLatencyMs: number | null }> = {};
+    const byProvider: Record<
+      string,
+      { total: number; completed: number; failed: number; meanLatencyMs: number | null }
+    > = {};
     for (const providerId of [...new Set(runs.map((r) => r.providerId))].sort()) {
       const mine = runs.filter((r) => r.providerId === providerId);
       byProvider[providerId] = {
@@ -213,9 +229,20 @@ export class GovernanceEngine {
  * How one provider's proposal did against what the user confirmed.
  * A null candidate means the provider surfaced nothing for this item at all.
  */
-function score(candidate: FoodCandidate | null, confirmedFoodItemId: string, confirmedGrams: number | null): SideOutcome {
+function score(
+  candidate: FoodCandidate | null,
+  confirmedFoodItemId: string,
+  confirmedGrams: number | null,
+): SideOutcome {
   if (!candidate) {
-    return { top1Hit: false, top3Hit: false, swapped: false, missed: true, portionErrorPct: null, reportedConfidence: null };
+    return {
+      top1Hit: false,
+      top3Hit: false,
+      swapped: false,
+      missed: true,
+      portionErrorPct: null,
+      reportedConfidence: null,
+    };
   }
   const top1Hit = candidate.foodItemId === confirmedFoodItemId;
   const inAlternates = candidate.alternates.some((a) => a.foodItemId === confirmedFoodItemId);

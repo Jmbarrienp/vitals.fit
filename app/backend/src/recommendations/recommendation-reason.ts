@@ -52,24 +52,36 @@ export enum RecommendationReason {
 }
 
 /** Reason → persisted RecommendationType + Priority. One place, no scattered casts. */
-export const REASON_META: Record<
-  RecommendationReason,
-  { type: RecommendationType; priority: Priority }
-> = {
+export const REASON_META: Record<RecommendationReason, { type: RecommendationType; priority: Priority }> = {
   [RecommendationReason.PLATEAU_SUSPECTED]: { type: RecommendationType.PLAN_ADJUSTMENT, priority: Priority.HIGH },
   [RecommendationReason.LOSING_TOO_FAST]: { type: RecommendationType.ALERT, priority: Priority.HIGH },
   [RecommendationReason.GAIN_STALLED]: { type: RecommendationType.PLAN_ADJUSTMENT, priority: Priority.MEDIUM },
 
-  [RecommendationReason.PROTEIN_CHRONIC_LOW]: { type: RecommendationType.BEHAVIOR_RECOMMENDATION, priority: Priority.MEDIUM },
+  [RecommendationReason.PROTEIN_CHRONIC_LOW]: {
+    type: RecommendationType.BEHAVIOR_RECOMMENDATION,
+    priority: Priority.MEDIUM,
+  },
   [RecommendationReason.WEEKEND_DRIFT]: { type: RecommendationType.BEHAVIOR_RECOMMENDATION, priority: Priority.MEDIUM },
-  [RecommendationReason.BREAKFAST_SKIPPED]: { type: RecommendationType.BEHAVIOR_RECOMMENDATION, priority: Priority.LOW },
-  [RecommendationReason.LOW_LOGGING_CONSISTENCY]: { type: RecommendationType.BEHAVIOR_RECOMMENDATION, priority: Priority.MEDIUM },
-  [RecommendationReason.LOW_ADHERENCE_WEEK]: { type: RecommendationType.BEHAVIOR_RECOMMENDATION, priority: Priority.HIGH },
+  [RecommendationReason.BREAKFAST_SKIPPED]: {
+    type: RecommendationType.BEHAVIOR_RECOMMENDATION,
+    priority: Priority.LOW,
+  },
+  [RecommendationReason.LOW_LOGGING_CONSISTENCY]: {
+    type: RecommendationType.BEHAVIOR_RECOMMENDATION,
+    priority: Priority.MEDIUM,
+  },
+  [RecommendationReason.LOW_ADHERENCE_WEEK]: {
+    type: RecommendationType.BEHAVIOR_RECOMMENDATION,
+    priority: Priority.HIGH,
+  },
 
   [RecommendationReason.NO_MEALS_LOGGED]: { type: RecommendationType.BEHAVIOR_RECOMMENDATION, priority: Priority.LOW },
   [RecommendationReason.OVER_TARGET]: { type: RecommendationType.EDUCATIONAL, priority: Priority.LOW },
   [RecommendationReason.TARGET_REACHED]: { type: RecommendationType.REINFORCEMENT, priority: Priority.LOW },
-  [RecommendationReason.PROTEIN_GAP_TODAY]: { type: RecommendationType.BEHAVIOR_RECOMMENDATION, priority: Priority.MEDIUM },
+  [RecommendationReason.PROTEIN_GAP_TODAY]: {
+    type: RecommendationType.BEHAVIOR_RECOMMENDATION,
+    priority: Priority.MEDIUM,
+  },
   [RecommendationReason.CALORIES_REMAINING]: { type: RecommendationType.EDUCATIONAL, priority: Priority.LOW },
 
   [RecommendationReason.STREAK_MILESTONE]: { type: RecommendationType.MILESTONE, priority: Priority.LOW },

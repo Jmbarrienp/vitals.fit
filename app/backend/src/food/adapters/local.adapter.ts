@@ -57,9 +57,7 @@ export class LocalFoodAdapter implements FoodAdapter {
 
   /** Foods visible to a user: global catalog + that user's own custom foods. */
   private eligibilityWhere(userId?: string) {
-    return userId
-      ? { OR: [{ createdByUserId: null }, { createdByUserId: userId }] }
-      : { createdByUserId: null };
+    return userId ? { OR: [{ createdByUserId: null }, { createdByUserId: userId }] } : { createdByUserId: null };
   }
 
   async search(query: string, limit: number, userId?: string): Promise<NormalizedFood[]> {

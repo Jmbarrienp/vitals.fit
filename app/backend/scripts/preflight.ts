@@ -76,11 +76,15 @@ async function main() {
   // por accidente no pasa desapercibido.
   const expected = process.env.EXPECTED_DB_FINGERPRINT;
   if (expected && expected !== target.fingerprint) {
-    block(`El fingerprint NO coincide con EXPECTED_DB_FINGERPRINT (esperado ${expected}, real ${target.fingerprint}). Estás apuntando a otra base.`);
+    block(
+      `El fingerprint NO coincide con EXPECTED_DB_FINGERPRINT (esperado ${expected}, real ${target.fingerprint}). Estás apuntando a otra base.`,
+    );
   } else if (expected) {
     info(`Fingerprint confirmado contra EXPECTED_DB_FINGERPRINT.`);
   } else {
-    warn('EXPECTED_DB_FINGERPRINT no está definida — no se puede confirmar que esta sea la base pretendida. Defínela para blindar futuros despliegues.');
+    warn(
+      'EXPECTED_DB_FINGERPRINT no está definida — no se puede confirmar que esta sea la base pretendida. Defínela para blindar futuros despliegues.',
+    );
   }
 
   if (isProduction && target.isLocal) {
@@ -109,10 +113,14 @@ async function main() {
       const failed = applied.rows.filter((r: any) => !r.finished_at || r.rolled_back_at);
       info(`Migraciones aplicadas: ${finished.length}.`);
       if (failed.length > 0) {
-        block(`Hay ${failed.length} migración(es) fallida(s) o revertida(s): ${failed.map((r: any) => r.migration_name).join(', ')}. Resuélvelas antes de continuar.`);
+        block(
+          `Hay ${failed.length} migración(es) fallida(s) o revertida(s): ${failed.map((r: any) => r.migration_name).join(', ')}. Resuélvelas antes de continuar.`,
+        );
       }
 
-      const local = execSync('node -e "const fs=require(\'fs\');console.log(fs.readdirSync(\'prisma/migrations\').filter(d=>fs.existsSync(`prisma/migrations/${d}/migration.sql`)).sort().join(\',\'))"')
+      const local = execSync(
+        "node -e \"const fs=require('fs');console.log(fs.readdirSync('prisma/migrations').filter(d=>fs.existsSync(`prisma/migrations/${d}/migration.sql`)).sort().join(','))\"",
+      )
         .toString()
         .trim();
       const localNames = local ? local.split(',') : [];
@@ -133,30 +141,38 @@ async function main() {
 
     let testUsers = 0;
     for (const pattern of TEST_EMAIL_PATTERNS) {
-      const r = await client.query('SELECT COUNT(*)::int AS n FROM "User" WHERE email LIKE $1', [pattern]).catch(() => ({ rows: [{ n: 0 }] }));
+      const r = await client
+        .query('SELECT COUNT(*)::int AS n FROM "User" WHERE email LIKE $1', [pattern])
+        .catch(() => ({ rows: [{ n: 0 }] }));
       testUsers += r.rows[0].n;
     }
     if (testUsers > 0) {
       const message = `Se detectaron ${testUsers} usuario(s) de prueba (@test.local / @example.com) en esta base.`;
       // En producción esto es exactamente el riesgo registrado: datos de
       // prueba conviviendo con cuentas reales.
-      if (isProduction) block(`${message} En producción esto indica que una suite de pruebas o un seed corrió contra la base real.`);
+      if (isProduction)
+        block(`${message} En producción esto indica que una suite de pruebas o un seed corrió contra la base real.`);
       else warn(message);
     } else {
       info('Sin usuarios de prueba detectados.');
     }
 
-    const meals = await client.query('SELECT COUNT(*)::int AS n FROM "LoggedMeal"').catch(() => ({ rows: [{ n: -1 }] }));
+    const meals = await client
+      .query('SELECT COUNT(*)::int AS n FROM "LoggedMeal"')
+      .catch(() => ({ rows: [{ n: -1 }] }));
     if (meals.rows[0].n >= 0) info(`Comidas registradas: ${meals.rows[0].n}.`);
 
     const foods = await client.query('SELECT COUNT(*)::int AS n FROM "FoodItem"').catch(() => ({ rows: [{ n: -1 }] }));
-    if (foods.rows[0].n === 0) warn('El catálogo de alimentos está VACÍO — la app no podrá buscar comida. ¿Falta el seed?');
+    if (foods.rows[0].n === 0)
+      warn('El catálogo de alimentos está VACÍO — la app no podrá buscar comida. ¿Falta el seed?');
     else if (foods.rows[0].n > 0) info(`Alimentos en catálogo: ${foods.rows[0].n}.`);
 
     // Producción con la base vacía de usuarios pero con migraciones aplicadas
     // es normal (primer deploy); con usuarios reales exige más cuidado.
     if (isProduction && userCount > 0) {
-      warn(`Esta base de PRODUCCIÓN ya tiene ${userCount} usuario(s). Confirma que existe un backup reciente antes de migrar.`);
+      warn(
+        `Esta base de PRODUCCIÓN ya tiene ${userCount} usuario(s). Confirma que existe un backup reciente antes de migrar.`,
+      );
     }
   } finally {
     await client.end().catch(() => undefined);

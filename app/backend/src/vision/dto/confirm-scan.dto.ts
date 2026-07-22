@@ -1,7 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  IsArray, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested,
-} from 'class-validator';
+import { IsArray, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 
 export class ConfirmScanItemDto {
   @IsOptional()

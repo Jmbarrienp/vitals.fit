@@ -51,16 +51,20 @@ export class FixtureBarcodeLookupProvider implements BarcodeLookupProvider {
 
     // Any other syntactically plausible barcode resolves to a generic packaged
     // product — keeps the happy path demoable without enumerating every case.
-    return this.result(true, {
-      name: 'Producto empacado',
-      brand: null,
-      servingGrams: null,
-      caloriesPer100g: 250,
-      proteinPer100g: 8,
-      carbsPer100g: 30,
-      fatPer100g: 10,
-      fiberPer100g: 1,
-    }, start);
+    return this.result(
+      true,
+      {
+        name: 'Producto empacado',
+        brand: null,
+        servingGrams: null,
+        caloriesPer100g: 250,
+        proteinPer100g: 8,
+        carbsPer100g: 30,
+        fatPer100g: 10,
+        fiberPer100g: 1,
+      },
+      start,
+    );
   }
 
   private result(found: boolean, product: BarcodeLookupResult['product'], start: number): BarcodeLookupResult {

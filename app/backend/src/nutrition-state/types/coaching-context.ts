@@ -28,16 +28,9 @@ export type CtxSex = 'male' | 'female' | 'other';
 export type CtxTrend = 'on_track' | 'stalled' | 'regressing' | 'insufficient_data';
 export type CtxPlateau = 'INSUFFICIENT_DATA' | 'NONE' | 'PLATEAU_SUSPECTED';
 export type CtxBehaviorFlag =
-  | 'PROTEIN_CHRONIC_LOW'
-  | 'LOW_LOGGING_CONSISTENCY'
-  | 'WEEKEND_OVEREATING'
-  | 'BREAKFAST_SKIPPED';
+  'PROTEIN_CHRONIC_LOW' | 'LOW_LOGGING_CONSISTENCY' | 'WEEKEND_OVEREATING' | 'BREAKFAST_SKIPPED';
 export type CtxFollowUpBasis =
-  | 'PERSISTENT_INTERVENED'
-  | 'PERSISTENT_IGNORED'
-  | 'NEW_ISSUE'
-  | 'RESOLVED_NEXT'
-  | 'MAINTAIN';
+  'PERSISTENT_INTERVENED' | 'PERSISTENT_IGNORED' | 'NEW_ISSUE' | 'RESOLVED_NEXT' | 'MAINTAIN';
 export type CtxIntervention = 'INTERVENED' | 'IGNORED' | 'NONE';
 
 /**

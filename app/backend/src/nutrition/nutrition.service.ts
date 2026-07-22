@@ -43,9 +43,8 @@ export class NutritionService {
     const { weightKg, heightCm, age, sex, activityLevel } = profile;
 
     // Step 1 — BMR (Mifflin-St Jeor)
-    const bmr = sex === 'MALE'
-      ? (10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5
-      : (10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161;
+    const bmr =
+      sex === 'MALE' ? 10 * weightKg + 6.25 * heightCm - 5 * age + 5 : 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
 
     // Step 2 — TDEE
     const activityFactor = ACTIVITY_FACTORS[activityLevel] ?? 1.2;
@@ -126,11 +125,11 @@ export class NutritionService {
         bmiCategory: this.getBmiCategory(bmi),
       },
       macros: {
-        protein: { g: proteinG, kcal: proteinG * 4, pct: Math.round((proteinG * 4 / targetCalories) * 100) },
-        fat:     { g: fatG,     kcal: fatKcal,       pct: Math.round((fatKcal / targetCalories) * 100) },
-        carbs:   { g: carbsG,   kcal: carbKcal,       pct: Math.round((carbKcal / targetCalories) * 100) },
-        fiber:   { g: fiberTargetG },
-        water:   { ml: waterMl },
+        protein: { g: proteinG, kcal: proteinG * 4, pct: Math.round(((proteinG * 4) / targetCalories) * 100) },
+        fat: { g: fatG, kcal: fatKcal, pct: Math.round((fatKcal / targetCalories) * 100) },
+        carbs: { g: carbsG, kcal: carbKcal, pct: Math.round((carbKcal / targetCalories) * 100) },
+        fiber: { g: fiberTargetG },
+        water: { ml: waterMl },
       },
       goal: updatedGoal,
     };
@@ -138,9 +137,9 @@ export class NutritionService {
 
   private getBmiCategory(bmi: number): string {
     if (bmi < 18.5) return 'underweight';
-    if (bmi < 25)   return 'normal';
-    if (bmi < 30)   return 'overweight';
-    if (bmi < 35)   return 'obesity_grade_1';
+    if (bmi < 25) return 'normal';
+    if (bmi < 30) return 'overweight';
+    if (bmi < 35) return 'obesity_grade_1';
     return 'obesity_grade_2';
   }
 }

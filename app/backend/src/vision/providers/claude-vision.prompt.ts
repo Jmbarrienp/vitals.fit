@@ -40,8 +40,7 @@ NO hagas nada de esto:
 
 Devuelve SOLO el objeto JSON del esquema.`;
 
-export const VISION_USER_PROMPT =
-  'Identifica los alimentos visibles en esta foto y estima la porción de cada uno.';
+export const VISION_USER_PROMPT = 'Identifica los alimentos visibles en esta foto y estima la porción de cada uno.';
 
 /**
  * The structured-output schema. Constrained decoding means the model cannot

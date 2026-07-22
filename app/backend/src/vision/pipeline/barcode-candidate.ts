@@ -30,7 +30,11 @@ export function buildBarcodeCandidate(
   defaultServingGrams: number | null,
 ): { candidate: FoodCandidate; scanConfidence: { overall: number; band: ConfidenceBand } } {
   const portion = estimatePortion(
-    { label: food.name, labelConfidence: 1, portionHint: productHint?.servingGrams ? { grams: productHint.servingGrams, confidence: 0.6 } : undefined },
+    {
+      label: food.name,
+      labelConfidence: 1,
+      portionHint: productHint?.servingGrams ? { grams: productHint.servingGrams, confidence: 0.6 } : undefined,
+    },
     defaultServingGrams,
   );
   const confidence = scoreCandidate(1, 1, portion.confidence);

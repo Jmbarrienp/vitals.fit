@@ -121,7 +121,11 @@ export class RolloutEngine {
           providerId,
           scans,
           stage: isActive ? (activeStages.length === 0 ? 'SHADOW' : global.stage) : 'SHADOW',
-          reasons: [isActive ? 'proveedor activo — hereda la etapa global' : 'no es el proveedor activo — solo acumula evidencia histórica'],
+          reasons: [
+            isActive
+              ? 'proveedor activo — hereda la etapa global'
+              : 'no es el proveedor activo — solo acumula evidencia histórica',
+          ],
         };
       }),
     };

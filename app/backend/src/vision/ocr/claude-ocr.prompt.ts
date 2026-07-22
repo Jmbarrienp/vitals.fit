@@ -70,7 +70,17 @@ export const LABEL_SCHEMA: Record<string, unknown> = {
     basis: { type: 'string', description: 'A qué cantidad se refieren los valores, verbatim. "" si no se indica.' },
     confidence: { type: 'number', description: 'Legibilidad general de la etiqueta, 0..1.' },
   },
-  required: ['productName', 'servingSize', 'servingsPerContainer', 'calories', 'protein', 'carbs', 'fat', 'basis', 'confidence'],
+  required: [
+    'productName',
+    'servingSize',
+    'servingsPerContainer',
+    'calories',
+    'protein',
+    'carbs',
+    'fat',
+    'basis',
+    'confidence',
+  ],
   additionalProperties: false,
 };
 

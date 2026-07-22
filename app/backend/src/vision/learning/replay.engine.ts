@@ -54,7 +54,9 @@ export class ReplayEngine {
     };
   }
 
-  private async replayOnce(dataset: GroundTruthDataset): Promise<Omit<ReplayReport, 'contractVersion' | 'deterministic'>> {
+  private async replayOnce(
+    dataset: GroundTruthDataset,
+  ): Promise<Omit<ReplayReport, 'contractVersion' | 'deterministic'>> {
     const photoScanIds = new Set(dataset.scans.filter((s) => s.source === 'PHOTO').map((s) => s.scanId));
     const examplesByScan = new Map<string, typeof dataset.examples>();
     for (const e of dataset.examples) {

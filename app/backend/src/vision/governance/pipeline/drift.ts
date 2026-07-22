@@ -66,7 +66,9 @@ export function detectDrift(
   }
   const eceDelta = delta(recentEce, priorEce);
   if (eceDelta != null && eceDelta >= DRIFT_ECE_RISE) {
-    reasons.push(`el error de calibración subió ${eceDelta.toFixed(4)} (${priorEce} → ${recentEce}) — la confianza reportada se volvió menos honesta`);
+    reasons.push(
+      `el error de calibración subió ${eceDelta.toFixed(4)} (${priorEce} → ${recentEce}) — la confianza reportada se volvió menos honesta`,
+    );
   }
   const availDelta = delta(recentAvail, priorAvail);
   if (availDelta != null && availDelta <= -DRIFT_AVAILABILITY_DROP) {

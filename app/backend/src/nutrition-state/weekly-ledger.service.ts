@@ -94,7 +94,14 @@ export class WeeklyLedgerService {
       }),
       this.prisma.dailyLog.findMany({
         where: { userId, date: { gte: spanStart, lt: spanEndExcl } },
-        select: { date: true, caloriesLogged: true, proteinG: true, planFollowed: true, adherencePct: true, loggedMeals: { select: { mealType: true } } },
+        select: {
+          date: true,
+          caloriesLogged: true,
+          proteinG: true,
+          planFollowed: true,
+          adherencePct: true,
+          loggedMeals: { select: { mealType: true } },
+        },
         orderBy: { date: 'asc' },
       }),
       this.prisma.weightLog.findMany({

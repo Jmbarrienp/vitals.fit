@@ -169,7 +169,15 @@ import { CanaryController } from './canary/canary.controller';
     // LOGIC is deterministic; the machine does not act.
     CanaryEngine,
   ],
-  controllers: [VisionController, LearningController, RolloutController, GovernanceController, PromotionController, RollbackController, CanaryController],
+  controllers: [
+    VisionController,
+    LearningController,
+    RolloutController,
+    GovernanceController,
+    PromotionController,
+    RollbackController,
+    CanaryController,
+  ],
   exports: [VisionScanService],
 })
 export class VisionModule {}

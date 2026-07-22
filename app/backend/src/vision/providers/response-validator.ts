@@ -58,8 +58,10 @@ export function validateRecognitionResult(raw: unknown): ValidationOutcome {
 function isValidUsage(u: unknown): boolean {
   if (!isObject(u)) return false;
   return (
-    isFiniteNumber(u.inputTokens) && (u.inputTokens as number) >= 0 &&
-    isFiniteNumber(u.outputTokens) && (u.outputTokens as number) >= 0
+    isFiniteNumber(u.inputTokens) &&
+    (u.inputTokens as number) >= 0 &&
+    isFiniteNumber(u.outputTokens) &&
+    (u.outputTokens as number) >= 0
   );
 }
 
@@ -100,7 +102,10 @@ function validateDetection(d: unknown, i: number): string[] {
       }
     }
   }
-  if (det.attributes !== undefined && (!Array.isArray(det.attributes) || !det.attributes.every((a) => typeof a === 'string'))) {
+  if (
+    det.attributes !== undefined &&
+    (!Array.isArray(det.attributes) || !det.attributes.every((a) => typeof a === 'string'))
+  ) {
     e.push(`detection[${i}].attributes must be a string[]`);
   }
   return e;

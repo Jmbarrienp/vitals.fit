@@ -36,7 +36,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const method = request?.method ?? 'UNKNOWN';
     const url = request?.url ?? 'unknown';
     const detail = exception instanceof Error ? `${exception.name}: ${exception.message}` : String(exception);
-    this.logger.error(`Unhandled error on ${method} ${url} — ${detail}`, exception instanceof Error ? exception.stack : undefined);
+    this.logger.error(
+      `Unhandled error on ${method} ${url} — ${detail}`,
+      exception instanceof Error ? exception.stack : undefined,
+    );
 
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,

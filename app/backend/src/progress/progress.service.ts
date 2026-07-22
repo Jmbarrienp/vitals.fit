@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LogWeightDto } from './dto/log-weight.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -96,9 +96,7 @@ export class ProgressService {
       daysTracked: days,
       goal: goal?.type ?? null,
       targetWeight: goal?.targetWeightKg ?? null,
-      toGoal: goal?.targetWeightKg
-        ? Math.round((goal.targetWeightKg - last.weightKg) * 10) / 10
-        : null,
+      toGoal: goal?.targetWeightKg ? Math.round((goal.targetWeightKg - last.weightKg) * 10) / 10 : null,
       history: logs,
     };
   }

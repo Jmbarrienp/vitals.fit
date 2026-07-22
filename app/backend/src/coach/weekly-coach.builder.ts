@@ -72,7 +72,8 @@ function adviceFor(reason: string, ctx: CoachingContext, week: CtxWeek | undefin
     case 'WEEKEND_DRIFT':
       return {
         diagnosis: 'Tus fines de semana sumaron bastantes más calorías que tus días de semana.',
-        action: 'Planea sábado y domingo con las mismas comidas base que entre semana; deja una sola comida libre, no dos días libres.',
+        action:
+          'Planea sábado y domingo con las mismas comidas base que entre semana; deja una sola comida libre, no dos días libres.',
       };
     case 'BREAKFAST_SKIPPED':
       return {

@@ -1,9 +1,27 @@
 import { IsString, IsInt, IsNumber, IsEnum, IsOptional, IsArray, Min, Max } from 'class-validator';
 
-export enum Sex { MALE = 'MALE', FEMALE = 'FEMALE', OTHER = 'OTHER' }
-export enum ActivityLevel { SEDENTARY = 'SEDENTARY', LIGHT = 'LIGHT', MODERATE = 'MODERATE', ACTIVE = 'ACTIVE', EXTRA = 'EXTRA' }
-export enum FitnessLevel { BEGINNER = 'BEGINNER', INTERMEDIATE = 'INTERMEDIATE', ADVANCED = 'ADVANCED' }
-export enum Equipment { GYM = 'GYM', HOME = 'HOME', NONE = 'NONE' }
+export enum Sex {
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  OTHER = 'OTHER',
+}
+export enum ActivityLevel {
+  SEDENTARY = 'SEDENTARY',
+  LIGHT = 'LIGHT',
+  MODERATE = 'MODERATE',
+  ACTIVE = 'ACTIVE',
+  EXTRA = 'EXTRA',
+}
+export enum FitnessLevel {
+  BEGINNER = 'BEGINNER',
+  INTERMEDIATE = 'INTERMEDIATE',
+  ADVANCED = 'ADVANCED',
+}
+export enum Equipment {
+  GYM = 'GYM',
+  HOME = 'HOME',
+  NONE = 'NONE',
+}
 
 export class UpdateProfileDto {
   @IsString()

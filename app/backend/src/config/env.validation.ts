@@ -49,7 +49,9 @@ export function collectEnvProblems(env: Record<string, unknown>): EnvValidationR
 
   const jwtSecret = str(env.JWT_SECRET);
   if (!jwtSecret) {
-    errors.push('JWT_SECRET is required — without it every login fails at runtime, long after the deploy that broke it.');
+    errors.push(
+      'JWT_SECRET is required — without it every login fails at runtime, long after the deploy that broke it.',
+    );
   } else {
     if (FORBIDDEN_SECRETS.includes(jwtSecret.toLowerCase())) {
       errors.push(
@@ -75,7 +77,9 @@ export function collectEnvProblems(env: Record<string, unknown>): EnvValidationR
   for (const flag of ['AUTO_ACCEPT_ENABLED']) {
     const value = env[flag];
     if (value !== undefined && value !== '' && !['true', 'false'].includes(String(value).toLowerCase())) {
-      errors.push(`${flag} must be exactly "true" or "false" (got "${String(value)}"). Anything else silently reads as false.`);
+      errors.push(
+        `${flag} must be exactly "true" or "false" (got "${String(value)}"). Anything else silently reads as false.`,
+      );
     }
   }
 
@@ -92,7 +96,9 @@ export function collectEnvProblems(env: Record<string, unknown>): EnvValidationR
     }
   }
   if (String(env.RATE_LIMIT_ENABLED ?? '').toLowerCase() === 'false' && isProduction) {
-    warnings.push('RATE_LIMIT_ENABLED=false in production — login brute force and Vision cost abuse are both unbounded. Confirm this is deliberate.');
+    warnings.push(
+      'RATE_LIMIT_ENABLED=false in production — login brute force and Vision cost abuse are both unbounded. Confirm this is deliberate.',
+    );
   }
 
   // ── Production posture (V5.3) ──
@@ -101,22 +107,32 @@ export function collectEnvProblems(env: Record<string, unknown>): EnvValidationR
     // clients send no Origin and are unaffected by an empty allowlist.
     const corsOrigins = str(env.CORS_ORIGINS);
     if (corsOrigins === '*') {
-      errors.push('CORS_ORIGINS must not be "*" in production — an explicit allowlist is required (or leave it unset to reject all browser origins).');
+      errors.push(
+        'CORS_ORIGINS must not be "*" in production — an explicit allowlist is required (or leave it unset to reject all browser origins).',
+      );
     } else if (!corsOrigins) {
-      warnings.push('CORS_ORIGINS is not set — every browser origin is rejected. Correct for a native-mobile-only client; set an allowlist before shipping a web client.');
+      warnings.push(
+        'CORS_ORIGINS is not set — every browser origin is rejected. Correct for a native-mobile-only client; set an allowlist before shipping a web client.',
+      );
     }
 
     // Operator separation: unset means the governance endpoints are closed to
     // everyone, which is safe but usually not what the operator intended.
     if (!str(env.ADMIN_EMAILS)) {
-      warnings.push('ADMIN_EMAILS is not set — operator endpoints (governance, rollout, promotion, rollback, canary) are denied to EVERYONE. Set it to grant operator access.');
+      warnings.push(
+        'ADMIN_EMAILS is not set — operator endpoints (governance, rollout, promotion, rollback, canary) are denied to EVERYONE. Set it to grant operator access.',
+      );
     }
 
     if (!str(env.ANTHROPIC_API_KEY)) {
-      warnings.push('ANTHROPIC_API_KEY is not set — AI features degrade to their deterministic fallbacks (by design, but confirm this is intended).');
+      warnings.push(
+        'ANTHROPIC_API_KEY is not set — AI features degrade to their deterministic fallbacks (by design, but confirm this is intended).',
+      );
     }
     if (String(env.AUTO_ACCEPT_ENABLED ?? '').toLowerCase() === 'true') {
-      warnings.push('AUTO_ACCEPT_ENABLED=true — the platform will log meals without asking. Confirm the shadow-mode evidence supported enabling it.');
+      warnings.push(
+        'AUTO_ACCEPT_ENABLED=true — the platform will log meals without asking. Confirm the shadow-mode evidence supported enabling it.',
+      );
     }
   }
 

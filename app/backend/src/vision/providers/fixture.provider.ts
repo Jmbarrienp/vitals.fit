@@ -47,15 +47,30 @@ export class FixtureVisionProvider implements VisionProvider {
       ];
       const scene = ref.includes('faint')
         ? { setting: 'RESTAURANT' as const, confidence: 0.3, restaurantName: null, category: null }
-        : { setting: 'RESTAURANT' as const, confidence: 0.85, restaurantName: 'La Esquina Criolla', category: 'latam casera' };
+        : {
+            setting: 'RESTAURANT' as const,
+            confidence: 0.85,
+            restaurantName: 'La Esquina Criolla',
+            category: 'latam casera',
+          };
       return { ...this.result(detections, req.imageRef), scene };
     }
 
     if (ref.includes('chicken') || ref.includes('pollo')) {
       return this.result(
         [
-          { label: 'pollo a la plancha', labelConfidence: 0.92, boundingBox: { x: 0.1, y: 0.1, w: 0.4, h: 0.4 }, portionHint: { grams: 180, confidence: 0.7 } },
-          { label: 'arroz blanco', labelConfidence: 0.85, boundingBox: { x: 0.5, y: 0.1, w: 0.35, h: 0.35 }, portionHint: { grams: 150, confidence: 0.6 } },
+          {
+            label: 'pollo a la plancha',
+            labelConfidence: 0.92,
+            boundingBox: { x: 0.1, y: 0.1, w: 0.4, h: 0.4 },
+            portionHint: { grams: 180, confidence: 0.7 },
+          },
+          {
+            label: 'arroz blanco',
+            labelConfidence: 0.85,
+            boundingBox: { x: 0.5, y: 0.1, w: 0.35, h: 0.35 },
+            portionHint: { grams: 150, confidence: 0.6 },
+          },
           { label: 'brocoli', labelConfidence: 0.78, boundingBox: { x: 0.1, y: 0.5, w: 0.3, h: 0.3 } },
         ],
         req.imageRef,

@@ -32,8 +32,6 @@ export class TelemetryService {
           compactSnapshot: entry.compactSnapshot as Prisma.InputJsonValue | undefined,
         },
       })
-      .catch((err: unknown) =>
-        this.logger.error('Failed to write AI generation log', err),
-      );
+      .catch((err: unknown) => this.logger.error('Failed to write AI generation log', err));
   }
 }

@@ -1,6 +1,4 @@
-import {
-  Controller, Post, Get, Patch, Delete, Body, Param, UseGuards, Request,
-} from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { LogsService } from './logs.service';
 import { LogMealDto } from './dto/log-meal.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';

@@ -86,7 +86,9 @@ export function decidePromotion(incumbent: ProviderScorecard, challenger: Provid
   const incumbentFailure = incumbent.failureRate ?? 0;
   const challengerFailure = challenger.failureRate ?? 0;
   if (challengerFailure > incumbentFailure + MAX_FAILURE_REGRESSION) {
-    reasons.push(`challenger regresses failure rate (${fmt(challengerFailure)} > ${fmt(incumbentFailure)} + ${MAX_FAILURE_REGRESSION})`);
+    reasons.push(
+      `challenger regresses failure rate (${fmt(challengerFailure)} > ${fmt(incumbentFailure)} + ${MAX_FAILURE_REGRESSION})`,
+    );
     return decision('KEEP_INCUMBENT', round2(z));
   }
 

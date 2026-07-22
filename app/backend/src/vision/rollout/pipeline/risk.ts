@@ -1,6 +1,13 @@
 import { ProviderScorecard } from '../../learning/types/eval-contract';
 import { HEALTH_MAX_ECE } from './health';
-import { GatesReport, HealthReport, RiskAssessment, RiskDimension, RiskLevel, ROLLOUT_CONTRACT_VERSION } from '../types/rollout-contract';
+import {
+  GatesReport,
+  HealthReport,
+  RiskAssessment,
+  RiskDimension,
+  RiskLevel,
+  ROLLOUT_CONTRACT_VERSION,
+} from '../types/rollout-contract';
 
 /**
  * Deployment risk (V4.0) — PURE, five dimensions, every claim with its number.
@@ -61,7 +68,10 @@ function technical(h: HealthReport): RiskDimension {
     level = worst(level, 'MEDIUM');
     e.push(`latencia media ${Math.round(h.meanLatencyMs)}ms > ${RISK_MED_LATENCY_MS}ms`);
   }
-  if (e.length === 0) e.push(`fallos ${pct(h.providerFailureRate)} y latencia ${h.meanLatencyMs == null ? 'n/d' : Math.round(h.meanLatencyMs) + 'ms'} dentro de umbrales`);
+  if (e.length === 0)
+    e.push(
+      `fallos ${pct(h.providerFailureRate)} y latencia ${h.meanLatencyMs == null ? 'n/d' : Math.round(h.meanLatencyMs) + 'ms'} dentro de umbrales`,
+    );
   return { dimension: 'TECHNICAL', level, evidence: e };
 }
 
@@ -70,7 +80,9 @@ function user(h: HealthReport): RiskDimension {
   let level: RiskLevel = 'LOW';
   if (h.undoRate != null && h.undoRate > RISK_HIGH_UNDO_RATE) {
     level = 'HIGH';
-    e.push(`tasa de undo ${pct(h.undoRate)} > ${pct(RISK_HIGH_UNDO_RATE)} — los usuarios están revirtiendo a la plataforma`);
+    e.push(
+      `tasa de undo ${pct(h.undoRate)} > ${pct(RISK_HIGH_UNDO_RATE)} — los usuarios están revirtiendo a la plataforma`,
+    );
   } else if (h.undoRate != null && h.undoRate > RISK_MED_UNDO_RATE) {
     level = 'MEDIUM';
     e.push(`tasa de undo ${pct(h.undoRate)} > ${pct(RISK_MED_UNDO_RATE)}`);
@@ -79,7 +91,8 @@ function user(h: HealthReport): RiskDimension {
     level = worst(level, h.falsePositives > 5 ? 'HIGH' : 'MEDIUM');
     e.push(`${h.falsePositives} auto-aceptaciones deshechas (falsos positivos)`);
   }
-  if (e.length === 0) e.push(`undo ${pct(h.undoRate)} y ${h.falsePositives} falsos positivos — sin señales de desconfianza`);
+  if (e.length === 0)
+    e.push(`undo ${pct(h.undoRate)} y ${h.falsePositives} falsos positivos — sin señales de desconfianza`);
   return { dimension: 'USER', level, evidence: e };
 }
 
@@ -88,7 +101,9 @@ function business(h: HealthReport, card: ProviderScorecard): RiskDimension {
   let level: RiskLevel = 'LOW';
   if (h.manualFallbackRate != null && h.manualFallbackRate > RISK_MED_FALLBACK_RATE) {
     level = 'MEDIUM';
-    e.push(`fallback manual ${pct(h.manualFallbackRate)} > ${pct(RISK_MED_FALLBACK_RATE)} — el valor de Vision no está llegando`);
+    e.push(
+      `fallback manual ${pct(h.manualFallbackRate)} > ${pct(RISK_MED_FALLBACK_RATE)} — el valor de Vision no está llegando`,
+    );
   }
   if (h.acceptanceRate != null && h.acceptanceRate < 0.5) {
     level = worst(level, 'MEDIUM');
@@ -96,9 +111,12 @@ function business(h: HealthReport, card: ProviderScorecard): RiskDimension {
   }
   if (card.meanTokensPerScan != null && h.falseNegatives > 10) {
     level = worst(level, 'MEDIUM');
-    e.push(`${h.falseNegatives} falsos negativos — fricción pagada (${Math.round(card.meanTokensPerScan)} tokens/scan) sin necesidad`);
+    e.push(
+      `${h.falseNegatives} falsos negativos — fricción pagada (${Math.round(card.meanTokensPerScan)} tokens/scan) sin necesidad`,
+    );
   }
-  if (e.length === 0) e.push(`aceptación ${pct(h.acceptanceRate)}, fallback ${pct(h.manualFallbackRate)} — el flujo aporta valor`);
+  if (e.length === 0)
+    e.push(`aceptación ${pct(h.acceptanceRate)}, fallback ${pct(h.manualFallbackRate)} — el flujo aporta valor`);
   return { dimension: 'BUSINESS', level, evidence: e };
 }
 
@@ -117,7 +135,10 @@ function model(h: HealthReport, card: ProviderScorecard): RiskDimension {
     level = worst(level, 'MEDIUM');
     e.push(`top-1 ${pct(card.top1Accuracy)} < ${pct(RISK_LOW_TOP1)}`);
   }
-  if (e.length === 0) e.push(`ECE ${h.calibration.currentEce ?? 'n/d'}, deriva ${h.calibration.drift ?? 'n/d'}, top-1 ${pct(card.top1Accuracy)} — modelo estable`);
+  if (e.length === 0)
+    e.push(
+      `ECE ${h.calibration.currentEce ?? 'n/d'}, deriva ${h.calibration.drift ?? 'n/d'}, top-1 ${pct(card.top1Accuracy)} — modelo estable`,
+    );
   return { dimension: 'MODEL', level, evidence: e };
 }
 
@@ -142,7 +163,10 @@ function operational(
     level = 'HIGH';
     e.push(`el scorecard evaluado ('${card.providerId}') no es el proveedor activo ('${posture.activeProviderId}')`);
   }
-  if (e.length === 0) e.push(`${card.sampleSizes.scans} scans, puertas sin rollback, postura consistente ('${posture.activeProviderId}')`);
+  if (e.length === 0)
+    e.push(
+      `${card.sampleSizes.scans} scans, puertas sin rollback, postura consistente ('${posture.activeProviderId}')`,
+    );
   return { dimension: 'OPERATIONAL', level, evidence: e };
 }
 

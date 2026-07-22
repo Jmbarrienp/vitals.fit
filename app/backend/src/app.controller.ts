@@ -88,7 +88,10 @@ export class AppController {
     checks.push({
       name: 'configuration',
       ok: errors.length === 0,
-      detail: errors.length === 0 ? `válida${warnings.length ? ` (${warnings.length} advertencia(s))` : ''}` : errors.join('; '),
+      detail:
+        errors.length === 0
+          ? `válida${warnings.length ? ` (${warnings.length} advertencia(s))` : ''}`
+          : errors.join('; '),
     });
 
     const isProduction = String(process.env.NODE_ENV ?? '').toLowerCase() === 'production';
@@ -104,7 +107,10 @@ export class AppController {
     checks.push({
       name: 'operator-access',
       ok: true, // never blocks readiness — failing closed is a valid posture
-      detail: adminEmails.length > 0 ? `${adminEmails.length} operador(es) configurado(s)` : 'sin operadores — endpoints de gobernanza cerrados a todos',
+      detail:
+        adminEmails.length > 0
+          ? `${adminEmails.length} operador(es) configurado(s)`
+          : 'sin operadores — endpoints de gobernanza cerrados a todos',
     });
 
     checks.push({
@@ -116,7 +122,10 @@ export class AppController {
     checks.push({
       name: 'rate-limiting',
       ok: String(process.env.RATE_LIMIT_ENABLED ?? 'true').toLowerCase() !== 'false',
-      detail: String(process.env.RATE_LIMIT_ENABLED ?? 'true').toLowerCase() === 'false' ? 'DESHABILITADO' : `activo (${RateLimitGuard.tracked} cliente(s) en ventana)`,
+      detail:
+        String(process.env.RATE_LIMIT_ENABLED ?? 'true').toLowerCase() === 'false'
+          ? 'DESHABILITADO'
+          : `activo (${RateLimitGuard.tracked} cliente(s) en ventana)`,
     });
 
     const ready = checks.every((c) => c.ok);

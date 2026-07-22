@@ -51,7 +51,14 @@ export class WeeklyReviewService {
     // Newest-first ledger history (this also lazily appends any newly-closed weeks).
     const entries = await this.ledger.getHistory(userId, REVIEW_WINDOW_WEEKS);
     if (entries.length === 0) {
-      return { hasReview: false, current: null, previous: null, followUp: EMPTY_FOLLOW_UP, retention: EMPTY_RETENTION, nextPriorities: [] };
+      return {
+        hasReview: false,
+        current: null,
+        previous: null,
+        followUp: EMPTY_FOLLOW_UP,
+        retention: EMPTY_RETENTION,
+        nextPriorities: [],
+      };
     }
 
     // Recommendation lifecycle over the same window (+14d lead so a commitment that

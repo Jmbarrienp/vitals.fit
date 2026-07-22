@@ -46,7 +46,8 @@ export function resolveCors(env: Record<string, unknown>): CorsPosture {
     return {
       origin: [],
       isWildcard: false,
-      reason: 'producción sin CORS_ORIGINS — ningún origen de navegador permitido (los clientes móviles nativos no se ven afectados)',
+      reason:
+        'producción sin CORS_ORIGINS — ningún origen de navegador permitido (los clientes móviles nativos no se ven afectados)',
     };
   }
   return { origin: true, isWildcard: true, reason: 'desarrollo — se refleja cualquier origen' };

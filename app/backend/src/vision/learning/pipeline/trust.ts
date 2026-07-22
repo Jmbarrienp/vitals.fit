@@ -64,7 +64,9 @@ export function computeTrust(
   // ── Evidence classification ────────────────────────────────────────────────
   if (evidence.userTotalConfirmations < NEW_USER_CONFIRMATIONS) {
     signals.push('NEW_USER');
-    reasons.push(`usuario nuevo: ${evidence.userTotalConfirmations} confirmaciones en total (mínimo ${NEW_USER_CONFIRMATIONS})`);
+    reasons.push(
+      `usuario nuevo: ${evidence.userTotalConfirmations} confirmaciones en total (mínimo ${NEW_USER_CONFIRMATIONS})`,
+    );
   } else {
     signals.push('KNOWN_USER');
   }
@@ -92,7 +94,9 @@ export function computeTrust(
       signals.push('CALIBRATED_HIGH');
     } else {
       signals.push('CALIBRATED_LOW');
-      reasons.push(`la confianza reportada (${fmt(reportedConfidence)}) históricamente significa ${fmt(calibratedConfidence)}`);
+      reasons.push(
+        `la confianza reportada (${fmt(reportedConfidence)}) históricamente significa ${fmt(calibratedConfidence)}`,
+      );
     }
   }
 
@@ -124,12 +128,16 @@ export function computeTrust(
   const evidenceFactor = evidence.confirmations / (evidence.confirmations + TRUST_EVIDENCE_K);
   const decay = decayFactor(daysSinceLastConfirmation);
   if (penalty > 0) {
-    reasons.push(`historial no impecable: ${pct(cleanliness)} de tus registros de este alimento quedaron como los propusimos`);
+    reasons.push(
+      `historial no impecable: ${pct(cleanliness)} de tus registros de este alimento quedaron como los propusimos`,
+    );
   }
   const base = evidenceFactor * cleanliness;
   if (decay < 0.75) {
     signals.push('TRUST_DECAYED');
-    reasons.push(`última confirmación hace ${daysSinceLastConfirmation} día(s) — la evidencia perdió peso (vida media ${TRUST_HALF_LIFE_DAYS}d)`);
+    reasons.push(
+      `última confirmación hace ${daysSinceLastConfirmation} día(s) — la evidencia perdió peso (vida media ${TRUST_HALF_LIFE_DAYS}d)`,
+    );
   }
   const score = round4(base * decay);
 

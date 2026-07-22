@@ -84,14 +84,19 @@ function decide(i: StageInputs): { stage: RolloutStage; reasons: string[] } {
   if (undoShare != null && undoShare > MAX_UNDO_SHARE) {
     return {
       stage: 'LIMITED',
-      reasons: [`tasa de undo ${pct(undoShare)} > ${pct(MAX_UNDO_SHARE)} — contenida hasta que la confianza se recupere`],
+      reasons: [
+        `tasa de undo ${pct(undoShare)} > ${pct(MAX_UNDO_SHARE)} — contenida hasta que la confianza se recupere`,
+      ],
     };
   }
   if (!i.healthGreen) {
     return { stage: 'LIMITED', reasons: ['salud del rollout fuera de verde — contenida'] };
   }
   if (i.executed < LIMITED_MAX_EXECUTED) {
-    return { stage: 'LIMITED', reasons: [`${i.executed}/${LIMITED_MAX_EXECUTED} auto-aceptaciones ejecutadas — fase temprana, vigilada`] };
+    return {
+      stage: 'LIMITED',
+      reasons: [`${i.executed}/${LIMITED_MAX_EXECUTED} auto-aceptaciones ejecutadas — fase temprana, vigilada`],
+    };
   }
   if (i.executed >= FULL_MIN_EXECUTED) {
     return { stage: 'FULL', reasons: [`${i.executed} ejecuciones con salud sostenida en verde`] };

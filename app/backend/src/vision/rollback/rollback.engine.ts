@@ -59,12 +59,21 @@ export class RollbackEngine {
 
   async checklist(days?: number, generatedAt?: string) {
     const plan = await this.plan(days, generatedAt);
-    return { version: plan.version, verification: plan.verificationChecklist, postRollback: plan.postRollbackChecklist };
+    return {
+      version: plan.version,
+      verification: plan.verificationChecklist,
+      postRollback: plan.postRollbackChecklist,
+    };
   }
 
   async monitoring(days?: number, generatedAt?: string) {
     const plan = await this.plan(days, generatedAt);
-    return { version: plan.version, monitoringPlan: plan.monitoringPlan, retryConditions: plan.retryConditions, communicationPlan: plan.communicationPlan };
+    return {
+      version: plan.version,
+      monitoringPlan: plan.monitoringPlan,
+      retryConditions: plan.retryConditions,
+      communicationPlan: plan.communicationPlan,
+    };
   }
 
   async summary(days?: number, generatedAt?: string) {

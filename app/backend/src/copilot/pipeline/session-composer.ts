@@ -60,7 +60,10 @@ export function composeSession(inputs: ComposerInputs, generatedAt: string): Cop
     const coachDuplicates =
       nextAction.source !== 'WEEKLY_COACH' && normalized(coach.nextAction) === normalized(nextAction.action);
     if (coachDuplicates) {
-      silenced.push({ module: 'WEEKLY_COACH', reason: 'su próxima acción repite la acción elegida — una sola voz por problema' });
+      silenced.push({
+        module: 'WEEKLY_COACH',
+        reason: 'su próxima acción repite la acción elegida — una sola voz por problema',
+      });
     } else {
       coachSummary = { summary: coach.summary, diagnosis: coach.diagnosis, source: coach.meta.source };
     }
@@ -73,7 +76,10 @@ export function composeSession(inputs: ComposerInputs, generatedAt: string): Cop
   // is noise before the loop is repaired.
   let mealSuggestions: CopilotSuggestion[] = [];
   if (focus.area === 'LOGGING') {
-    silenced.push({ module: 'MEAL_PLANNER', reason: 'el foco es reparar el registro — sugerir comidas antes de eso es ruido' });
+    silenced.push({
+      module: 'MEAL_PLANNER',
+      reason: 'el foco es reparar el registro — sugerir comidas antes de eso es ruido',
+    });
   } else {
     mealSuggestions = mealPlan.meals.slice(0, MAX_SUGGESTIONS).map((m: { name: string; targetCalories?: number }) => ({
       source: 'MEAL_PLANNER' as const,
@@ -129,7 +135,11 @@ export function composeSession(inputs: ComposerInputs, generatedAt: string): Cop
       decisions: plan.decisions.length,
       reviewWindowDays: plan.reviewWindowDays,
     },
-    activeCommitments: ctx.commitments.active.map((c) => ({ message: c.message, reason: c.reason, expiresAt: c.expiresAt })),
+    activeCommitments: ctx.commitments.active.map((c) => ({
+      message: c.message,
+      reason: c.reason,
+      expiresAt: c.expiresAt,
+    })),
     unresolvedIssues: (ctx.review?.followUp.persisting ?? []).map((i) => ({
       issue: i.issue,
       weeksActive: i.weeksActive,
@@ -181,7 +191,10 @@ export function deriveFocus(ctx: CoachingContext, plan: NutritionPlan): { area: 
   // The planner's own vocabulary: EVOLVING = a dimension should change. A
   // concrete numeric adjustment also counts, whatever the posture label.
   if (plan.posture === 'EVOLVING' || plan.headline.adjustment !== null) {
-    return { area: 'ADJUSTMENT', reason: `el planner decidió '${plan.headline.code}' este ciclo — aplicar el cambio es la prioridad` };
+    return {
+      area: 'ADJUSTMENT',
+      reason: `el planner decidió '${plan.headline.code}' este ciclo — aplicar el cambio es la prioridad`,
+    };
   }
   return { area: 'MAINTAIN', reason: 'todo en verde — proteger la racha es el mejor movimiento' };
 }
@@ -219,10 +232,18 @@ function deriveNextAction(
         reason: `${recommendations.length - 1} recomendación(es) adicionales retenidas — una acción a la vez`,
       });
     }
-    return { source: 'RECOMMENDATIONS', action: topRec.message, reason: 'la recomendación activa de mayor prioridad ya apunta al problema vigente' };
+    return {
+      source: 'RECOMMENDATIONS',
+      action: topRec.message,
+      reason: 'la recomendación activa de mayor prioridad ya apunta al problema vigente',
+    };
   }
   if (coach) {
-    return { source: 'WEEKLY_COACH', action: coach.nextAction, reason: 'sin nudges activos — la próxima acción del coach semanal es la más fundamentada' };
+    return {
+      source: 'WEEKLY_COACH',
+      action: coach.nextAction,
+      reason: 'sin nudges activos — la próxima acción del coach semanal es la más fundamentada',
+    };
   }
   return {
     source: 'PLANNER',

@@ -63,7 +63,8 @@ export function validateNutritionLabel(label: NutritionLabel): LabelValidationOu
   if (label.protein > MAX_PROTEIN) errors.push(`protein exceeds the maximum the platform accepts (${MAX_PROTEIN})`);
   if (label.carbs > MAX_CARBS) errors.push(`carbs exceeds the maximum the platform accepts (${MAX_CARBS})`);
   if (label.fat > MAX_FAT) errors.push(`fat exceeds the maximum the platform accepts (${MAX_FAT})`);
-  if (label.servingSize > MAX_SERVING) errors.push(`servingSize exceeds the maximum the platform accepts (${MAX_SERVING})`);
+  if (label.servingSize > MAX_SERVING)
+    errors.push(`servingSize exceeds the maximum the platform accepts (${MAX_SERVING})`);
 
   // Mass conservation — only meaningful for a mass serving. 'ml' is left out on
   // purpose: density is not 1 for every liquid, and a false impossible-label
@@ -71,7 +72,9 @@ export function validateNutritionLabel(label: NutritionLabel): LabelValidationOu
   if (label.servingUnit === 'g' && label.servingSize > 0) {
     const macroMass = label.protein + label.carbs + label.fat;
     if (macroMass > label.servingSize * MASS_TOLERANCE) {
-      errors.push(`macros weigh more than the serving (${round1(macroMass)}g of macros in a ${label.servingSize}g serving)`);
+      errors.push(
+        `macros weigh more than the serving (${round1(macroMass)}g of macros in a ${label.servingSize}g serving)`,
+      );
     }
   }
 

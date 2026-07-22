@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+# V5.4 pre-commit gate. Fast checks only — a hook slower than ~30s gets
+# bypassed with --no-verify, which is worse than no hook at all. The full
+# 21-suite regression is CI's job, not the committer's.
+cd app/backend || exit 0
+
+echo "→ lint-staged (formato + lint de lo que vas a commitear)"
+npx lint-staged || exit 1
+
+echo "→ typecheck"
+npm run typecheck || exit 1
+
+echo "→ límites arquitectónicos"
+npm run check:boundaries || exit 1
+
+echo "✓ pre-commit OK"

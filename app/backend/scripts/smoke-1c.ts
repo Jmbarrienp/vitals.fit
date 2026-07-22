@@ -128,51 +128,99 @@ async function main() {
 
   // 1. Búsqueda con acento (query sin acento debe encontrar "Brócoli")
   const r1 = await food.search('brocoli', 15, uid);
-  check('search "brocoli" → encuentra Brócoli (acento)', r1.some((f) => f.name === 'Brócoli'));
+  check(
+    'search "brocoli" → encuentra Brócoli (acento)',
+    r1.some((f) => f.name === 'Brócoli'),
+  );
 
   // 2. Búsqueda con typo (levenshtein)
   const r2 = await food.search('brocli', 15, uid);
-  check('search "brocli" (typo) → encuentra Brócoli', r2.some((f) => f.name === 'Brócoli'));
+  check(
+    'search "brocli" (typo) → encuentra Brócoli',
+    r2.some((f) => f.name === 'Brócoli'),
+  );
 
   // 3. Búsqueda por alias
   const r3 = await food.search('banana', 15, uid);
-  check('search "banana" (alias) → encuentra Plátano maduro', r3.some((f) => f.name === 'Plátano maduro'));
+  check(
+    'search "banana" (alias) → encuentra Plátano maduro',
+    r3.some((f) => f.name === 'Plátano maduro'),
+  );
 
   // 4. Favorito: marcar y persistir
   await food.addFavorite(uid, ids['Brócoli']);
   const favs = await food.getFavorites(uid);
-  check('favorito persiste en getFavorites', favs.some((f) => f.id === ids['Brócoli']));
+  check(
+    'favorito persiste en getFavorites',
+    favs.some((f) => f.id === ids['Brócoli']),
+  );
   const r4 = await food.search('brocoli', 15, uid);
   check('search refleja isFavorite=true', !!r4.find((f) => f.id === ids['Brócoli'])?.isFavorite);
 
   // 5. Registro desde catálogo → guarda foodItemId
-  await logs.logMeal(uid, { mealType: 'LUNCH', items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 150, unit: 'g' }] } as any);
+  await logs.logMeal(uid, {
+    mealType: 'LUNCH',
+    items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 150, unit: 'g' }],
+  } as any);
   const persistedItem = await prisma.loggedMealItem.findFirst({ where: { foodItemId: ids['Pechuga de pollo'] } });
-  check('logMeal guarda LoggedMealItem.foodItemId', !!persistedItem, `foodItemId=${persistedItem?.foodItemId ?? 'null'}`);
-  check('macros calculados en server (165*1.5≈248)', persistedItem?.calories === 248, `calories=${persistedItem?.calories}`);
+  check(
+    'logMeal guarda LoggedMealItem.foodItemId',
+    !!persistedItem,
+    `foodItemId=${persistedItem?.foodItemId ?? 'null'}`,
+  );
+  check(
+    'macros calculados en server (165*1.5≈248)',
+    persistedItem?.calories === 248,
+    `calories=${persistedItem?.calories}`,
+  );
 
   // 6. Recientes: el pollo registrado aparece
   const recent = await food.getRecent(uid);
-  check('getRecent incluye Pechuga de pollo', recent.some((f) => f.id === ids['Pechuga de pollo']));
+  check(
+    'getRecent incluye Pechuga de pollo',
+    recent.some((f) => f.id === ids['Pechuga de pollo']),
+  );
 
   // 7. Frecuentes: requiere umbral mínimo de registros (no aparece con pocos).
-  await logs.logMeal(uid, { mealType: 'DINNER', items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 100, unit: 'g' }] } as any);
+  await logs.logMeal(uid, {
+    mealType: 'DINNER',
+    items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 100, unit: 'g' }],
+  } as any);
   const frequentAt2 = await food.getFrequent(uid); // pollo lleva 2 registros
-  check('getFrequent NO incluye pollo con 2 registros (bajo umbral)', !frequentAt2.some((f) => f.id === ids['Pechuga de pollo']));
-  await logs.logMeal(uid, { mealType: 'SNACK', items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 50, unit: 'g' }] } as any);
+  check(
+    'getFrequent NO incluye pollo con 2 registros (bajo umbral)',
+    !frequentAt2.some((f) => f.id === ids['Pechuga de pollo']),
+  );
+  await logs.logMeal(uid, {
+    mealType: 'SNACK',
+    items: [{ foodItemId: ids['Pechuga de pollo'], quantity: 50, unit: 'g' }],
+  } as any);
   const frequent = await food.getFrequent(uid); // pollo llega a 3 registros
-  check('getFrequent incluye pollo al alcanzar el umbral (3)', frequent.some((f) => f.id === ids['Pechuga de pollo']));
+  check(
+    'getFrequent incluye pollo al alcanzar el umbral (3)',
+    frequent.some((f) => f.id === ids['Pechuga de pollo']),
+  );
 
   // 8. Custom food: crear, buscar y registrar
   const custom = await food.createCustom(uid, {
-    name: 'Granola casera', caloriesPer100g: 471, proteinPer100g: 10, carbsPer100g: 64, fatPer100g: 20,
+    name: 'Granola casera',
+    caloriesPer100g: 471,
+    proteinPer100g: 10,
+    carbsPer100g: 64,
+    fatPer100g: 20,
   });
   check('createCustom devuelve alimento', !!custom?.id, `id=${custom?.id}`);
   const r5 = await food.search('granola', 15, uid);
-  check('custom food es buscable por su dueño', r5.some((f) => f.id === custom.id));
+  check(
+    'custom food es buscable por su dueño',
+    r5.some((f) => f.id === custom.id),
+  );
   await logs.logMeal(uid, { mealType: 'SNACK', items: [{ foodItemId: custom.id, quantity: 50, unit: 'g' }] } as any);
   const recent2 = await food.getRecent(uid);
-  check('custom food reutilizable → aparece en recientes', recent2.some((f) => f.id === custom.id));
+  check(
+    'custom food reutilizable → aparece en recientes',
+    recent2.some((f) => f.id === custom.id),
+  );
 
   // 9. Aislamiento: otro usuario NO ve el custom food ajeno
   const other = await prisma.user.create({ data: { email: 'other@test.local' } });
@@ -180,8 +228,16 @@ async function main() {
   check('custom food NO visible para otro usuario (privacidad)', !r6.some((f) => f.id === custom.id));
 
   await prisma.$disconnect();
-  try { await pg.stop(); } catch { /* teardown */ }
-  try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    await pg.stop();
+  } catch {
+    /* teardown */
+  }
+  try {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 
   console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke 1C`);
   process.exit(failures === 0 ? 0 : 1);

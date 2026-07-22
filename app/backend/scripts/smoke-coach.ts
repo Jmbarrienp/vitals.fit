@@ -68,7 +68,13 @@ async function applyMigrations() {
 
 async function main() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-coach-'));
-  const pg = new EmbeddedPostgres({ databaseDir: dataDir, user: 'postgres', password: 'postgres', port: PORT, persistent: false });
+  const pg = new EmbeddedPostgres({
+    databaseDir: dataDir,
+    user: 'postgres',
+    password: 'postgres',
+    port: PORT,
+    persistent: false,
+  });
 
   console.log('▶ Booting embedded Postgres…');
   await pg.initialise();
@@ -93,47 +99,144 @@ async function main() {
 
   const mkUser = async (email: string) => {
     const u = await prisma.user.create({ data: { email } });
-    await prisma.userProfile.create({ data: { userId: u.id, name: 'T', age: 30, weightKg: 80, heightCm: 178, sex: 'MALE', activityLevel: 'MODERATE', fitnessLevel: 'BEGINNER' } });
-    await prisma.goal.create({ data: { userId: u.id, type: 'LOSE_FAT', targetCalories: 2000, proteinG: 150, carbsG: 200, fatG: 60, fiberTargetG: 30, waterMl: 2500, bmr: 1600, tdee: 2300, formulaUsed: 'mifflin_st_jeor', goalAdjustment: -300 } });
+    await prisma.userProfile.create({
+      data: {
+        userId: u.id,
+        name: 'T',
+        age: 30,
+        weightKg: 80,
+        heightCm: 178,
+        sex: 'MALE',
+        activityLevel: 'MODERATE',
+        fitnessLevel: 'BEGINNER',
+      },
+    });
+    await prisma.goal.create({
+      data: {
+        userId: u.id,
+        type: 'LOSE_FAT',
+        targetCalories: 2000,
+        proteinG: 150,
+        carbsG: 200,
+        fatG: 60,
+        fiberTargetG: 30,
+        waterMl: 2500,
+        bmr: 1600,
+        tdee: 2300,
+        formulaUsed: 'mifflin_st_jeor',
+        goalAdjustment: -300,
+      },
+    });
     return u;
   };
   const logDay = (userId: string, date: Date, proteinG: number) =>
-    prisma.dailyLog.create({ data: {
-      userId, date, caloriesLogged: 2000, proteinG, planFollowed: true, adherencePct: 1.0,
-      loggedMeals: { create: [
-        { mealType: 'BREAKFAST' as const, totalCalories: 600, totalProteinG: proteinG * 0.4, totalCarbsG: 60, totalFatG: 18 },
-        { mealType: 'LUNCH' as const, totalCalories: 1400, totalProteinG: proteinG * 0.6, totalCarbsG: 140, totalFatG: 42 },
-      ] },
-    } });
+    prisma.dailyLog.create({
+      data: {
+        userId,
+        date,
+        caloriesLogged: 2000,
+        proteinG,
+        planFollowed: true,
+        adherencePct: 1.0,
+        loggedMeals: {
+          create: [
+            {
+              mealType: 'BREAKFAST' as const,
+              totalCalories: 600,
+              totalProteinG: proteinG * 0.4,
+              totalCarbsG: 60,
+              totalFatG: 18,
+            },
+            {
+              mealType: 'LUNCH' as const,
+              totalCalories: 1400,
+              totalProteinG: proteinG * 0.6,
+              totalCarbsG: 140,
+              totalFatG: 42,
+            },
+          ],
+        },
+      },
+    });
 
   // ── USER RESOLVED: low protein (weekB) -> fixed (weekC) + completed intervention. ──
   const uR = await mkUser('coach-resolved@test.local');
   for (let i = 0; i < 5; i++) await logDay(uR.id, addDaysUTC(weekB, i), 60);
   for (let i = 0; i < 7; i++) await logDay(uR.id, addDaysUTC(weekC, i), 150);
-  await prisma.recommendation.create({ data: { userId: uR.id, type: 'BEHAVIOR_RECOMMENDATION', priority: 'MEDIUM', trigger: 'meal.logged', reason: 'PROTEIN_CHRONIC_LOW', messageForUser: 'Sube proteina.', status: 'COMPLETED', createdAt: addDaysUTC(weekB, 1), committedAt: addDaysUTC(weekB, 2), commitExpiresAt: addDaysUTC(weekC, 2), completedAt: addDaysUTC(weekC, 2) } });
+  await prisma.recommendation.create({
+    data: {
+      userId: uR.id,
+      type: 'BEHAVIOR_RECOMMENDATION',
+      priority: 'MEDIUM',
+      trigger: 'meal.logged',
+      reason: 'PROTEIN_CHRONIC_LOW',
+      messageForUser: 'Sube proteina.',
+      status: 'COMPLETED',
+      createdAt: addDaysUTC(weekB, 1),
+      committedAt: addDaysUTC(weekB, 2),
+      commitExpiresAt: addDaysUTC(weekC, 2),
+      completedAt: addDaysUTC(weekC, 2),
+    },
+  });
 
   const ctxR = await coaching.build(uR.id, 'full');
   const detR = buildDeterministicCoach(ctxR)!;
   console.log('\n── DETERMINISTIC COACH (resolved week) ──');
   check('structure: 4 sections, all required non-empty', !!detR.summary && !!detR.diagnosis && !!detR.nextAction);
   check('summary grounded in the week', detR.summary.includes('Semana del') && detR.summary.includes('7/7'));
-  check('primary reason = STEADY (issue resolved)', detR.meta.grounding.primaryReason === 'STEADY', detR.meta.grounding.primaryReason ?? 'null');
-  check('grounding basis = RESOLVED_NEXT', detR.meta.grounding.nextPriorityBasis === 'RESOLVED_NEXT', `${detR.meta.grounding.nextPriorityBasis}`);
-  check('follow-up acknowledges the improvement', !!detR.optionalFollowUp && detR.optionalFollowUp.toLowerCase().includes('adherencia'), detR.optionalFollowUp ?? 'null');
-  check('source deterministic (no model)', detR.meta.source === 'deterministic' && detR.meta.grounding.contractVersion === 1);
+  check(
+    'primary reason = STEADY (issue resolved)',
+    detR.meta.grounding.primaryReason === 'STEADY',
+    detR.meta.grounding.primaryReason ?? 'null',
+  );
+  check(
+    'grounding basis = RESOLVED_NEXT',
+    detR.meta.grounding.nextPriorityBasis === 'RESOLVED_NEXT',
+    `${detR.meta.grounding.nextPriorityBasis}`,
+  );
+  check(
+    'follow-up acknowledges the improvement',
+    !!detR.optionalFollowUp && detR.optionalFollowUp.toLowerCase().includes('adherencia'),
+    detR.optionalFollowUp ?? 'null',
+  );
+  check(
+    'source deterministic (no model)',
+    detR.meta.source === 'deterministic' && detR.meta.grounding.contractVersion === 1,
+  );
 
   // ── USER PERSIST: low protein both weeks -> specific protein coaching. ──
   const uP = await mkUser('coach-persist@test.local');
   for (let i = 0; i < 5; i++) await logDay(uP.id, addDaysUTC(weekB, i), 60);
   for (let i = 0; i < 5; i++) await logDay(uP.id, addDaysUTC(weekC, i), 60);
-  await prisma.recommendation.create({ data: { userId: uP.id, type: 'BEHAVIOR_RECOMMENDATION', priority: 'MEDIUM', trigger: 'meal.logged', reason: 'PROTEIN_CHRONIC_LOW', messageForUser: 'Sube proteina.', status: 'COMMITTED', createdAt: addDaysUTC(weekB, 1), committedAt: addDaysUTC(weekB, 2), commitExpiresAt: addDaysUTC(weekC, 6) } });
+  await prisma.recommendation.create({
+    data: {
+      userId: uP.id,
+      type: 'BEHAVIOR_RECOMMENDATION',
+      priority: 'MEDIUM',
+      trigger: 'meal.logged',
+      reason: 'PROTEIN_CHRONIC_LOW',
+      messageForUser: 'Sube proteina.',
+      status: 'COMMITTED',
+      createdAt: addDaysUTC(weekB, 1),
+      committedAt: addDaysUTC(weekB, 2),
+      commitExpiresAt: addDaysUTC(weekC, 6),
+    },
+  });
 
   const ctxP = await coaching.build(uP.id, 'full');
   const detP = buildDeterministicCoach(ctxP)!;
   console.log('\n── DETERMINISTIC COACH (persisting protein) ──');
-  check('primary reason = PROTEIN_CHRONIC_LOW', detP.meta.grounding.primaryReason === 'PROTEIN_CHRONIC_LOW', `${detP.meta.grounding.primaryReason}`);
+  check(
+    'primary reason = PROTEIN_CHRONIC_LOW',
+    detP.meta.grounding.primaryReason === 'PROTEIN_CHRONIC_LOW',
+    `${detP.meta.grounding.primaryReason}`,
+  );
   check('diagnosis is about protein', detP.diagnosis.toLowerCase().includes('proteína'), detP.diagnosis);
-  check('nextAction is specific (grams + breakfast)', /\d+\s*g/.test(detP.nextAction) && detP.nextAction.toLowerCase().includes('desayuno'), detP.nextAction);
+  check(
+    'nextAction is specific (grams + breakfast)',
+    /\d+\s*g/.test(detP.nextAction) && detP.nextAction.toLowerCase().includes('desayuno'),
+    detP.nextAction,
+  );
   check('deterministic is idempotent', JSON.stringify(buildDeterministicCoach(ctxP)) === JSON.stringify(detP));
 
   // ── NO COMPLETED WEEK: coach gates off cleanly. ──
@@ -152,8 +255,13 @@ async function main() {
 
   // ── PARSER robustness (model-output tolerance). ──
   console.log('\n── PARSER ──');
-  const good = parseCoachResponse('RESUMEN: sem ok\nDIAGNOSTICO: proteina baja\nACCION: suma 30g\nSEGUIMIENTO: mejoro adherencia');
-  check('parses a well-formed 4-line response', good?.summary === 'sem ok' && good?.nextAction === 'suma 30g' && good?.optionalFollowUp === 'mejoro adherencia');
+  const good = parseCoachResponse(
+    'RESUMEN: sem ok\nDIAGNOSTICO: proteina baja\nACCION: suma 30g\nSEGUIMIENTO: mejoro adherencia',
+  );
+  check(
+    'parses a well-formed 4-line response',
+    good?.summary === 'sem ok' && good?.nextAction === 'suma 30g' && good?.optionalFollowUp === 'mejoro adherencia',
+  );
   const dash = parseCoachResponse('RESUMEN: a\nDIAGNOSTICO: b\nACCION: c\nSEGUIMIENTO: -');
   check('SEGUIMIENTO "-" maps to null follow-up', dash !== null && dash.optionalFollowUp === null);
   const missing = parseCoachResponse('RESUMEN: a\nACCION: c');
@@ -162,8 +270,16 @@ async function main() {
   check('tolerates accented labels', accented?.diagnosis === 'b' && accented?.nextAction === 'c');
 
   await prisma.$disconnect();
-  try { await pg.stop(); } catch { /* teardown */ }
-  try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    await pg.stop();
+  } catch {
+    /* teardown */
+  }
+  try {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 
   console.log(`\n${failures === 0 ? '🎉 TODO VERDE' : `⚠️  ${failures} fallo(s)`} — smoke Weekly Coach`);
   process.exit(failures === 0 ? 0 : 1);

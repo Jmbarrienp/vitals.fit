@@ -30,13 +30,7 @@ export const OCR_CONTRACT_VERSION = 1;
 
 /** Fields the platform can report as missing. Pinned vocabulary — never a free string. */
 export type NutritionLabelField =
-  | 'productName'
-  | 'servingSize'
-  | 'servingsPerContainer'
-  | 'calories'
-  | 'protein'
-  | 'carbs'
-  | 'fat';
+  'productName' | 'servingSize' | 'servingsPerContainer' | 'calories' | 'protein' | 'carbs' | 'fat';
 
 /** Normalized serving unit. 'unit' = the label used something we cannot convert to mass (e.g. "1 bar"). */
 export type ServingUnit = 'g' | 'ml' | 'unit';

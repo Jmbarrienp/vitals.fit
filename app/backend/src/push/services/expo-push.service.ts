@@ -35,12 +35,7 @@ export class ExpoPushService {
     );
   }
 
-  private async doSend(
-    userId: string,
-    title: string,
-    body: string,
-    trigger: string,
-  ): Promise<void> {
+  private async doSend(userId: string, title: string, body: string, trigger: string): Promise<void> {
     const tokens = await this.deviceToken.getActiveForUser(userId);
 
     if (tokens.length === 0) {
@@ -91,13 +86,9 @@ export class ExpoPushService {
         });
 
         if (ticket.status === 'ok') {
-          this.logger.log(
-            `Push sent userId=${userId} trigger=${trigger} receipt=${ticket.id}`,
-          );
+          this.logger.log(`Push sent userId=${userId} trigger=${trigger} receipt=${ticket.id}`);
         } else {
-          this.logger.warn(
-            `Push failed userId=${userId} error=${ticket.details?.error} token=${token.slice(-6)}`,
-          );
+          this.logger.warn(`Push failed userId=${userId} error=${ticket.details?.error} token=${token.slice(-6)}`);
         }
       }),
     );

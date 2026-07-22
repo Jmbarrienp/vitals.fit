@@ -1,6 +1,4 @@
-import {
-  Controller, Get, Post, Delete, Query, Param, Body, Request, UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Delete, Query, Param, Body, Request, UseGuards } from '@nestjs/common';
 import { FoodService } from './food.service';
 import { SearchFoodDto } from './dto/search-food.dto';
 import { CreateCustomFoodDto } from './dto/create-custom-food.dto';

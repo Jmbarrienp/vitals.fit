@@ -39,7 +39,11 @@ export function buildTrustAnalytics(
     perUser: slices(rows, undoneScanIds, (r) => r.userId),
     perProvider: slices(rows, undoneScanIds, (r) => r.providerId),
     perModality: slices(rows, undoneScanIds, (r) => r.modality),
-    perFood: slices(rows.filter((r) => r.foodItemId), undoneScanIds, (r) => r.foodItemId!),
+    perFood: slices(
+      rows.filter((r) => r.foodItemId),
+      undoneScanIds,
+      (r) => r.foodItemId!,
+    ),
     portionTrust: {
       examples: examples.length,
       editedShare,
@@ -79,7 +83,15 @@ function slices(rows: TrustDecisionRow[], undone: Set<string>, keyOf: (r: TrustD
 export function slice(key: string, rows: TrustDecisionRow[], undone: Set<string>): TrustSlice {
   const n = rows.length;
   if (n === 0) {
-    return { key, decisions: 0, autoAcceptShare: null, executedShare: null, undoShare: null, avgTrustScore: null, score: null };
+    return {
+      key,
+      decisions: 0,
+      autoAcceptShare: null,
+      executedShare: null,
+      undoShare: null,
+      avgTrustScore: null,
+      score: null,
+    };
   }
   const autoAccept = rows.filter((r) => r.action === 'AUTO_ACCEPT');
   const executed = rows.filter((r) => r.executed);

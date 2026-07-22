@@ -32,7 +32,10 @@ function flag(name: string): boolean {
 async function main() {
   const prisma = new PrismaService();
   await prisma.$connect();
-  const engine = new EvaluationEngine(new GroundTruthReader(prisma), new ReplayEngine(prisma, new FoodService(new LocalFoodAdapter(prisma))));
+  const engine = new EvaluationEngine(
+    new GroundTruthReader(prisma),
+    new ReplayEngine(prisma, new FoodService(new LocalFoodAdapter(prisma))),
+  );
 
   const days = arg('days') ? Number(arg('days')) : undefined;
   const provider = arg('provider');

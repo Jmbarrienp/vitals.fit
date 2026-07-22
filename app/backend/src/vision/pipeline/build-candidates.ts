@@ -21,7 +21,10 @@ export function buildCandidates(
   searchResultsByIndex: NormalizedFood[][],
   defaultServingGramsByIndex: (number | null)[] = [],
   priorInputsByIndex: (PortionPriorInputs | null)[] = [],
-): { candidates: FoodCandidate[]; scanConfidence: { overall: number; band: import('../types/vision-contract').ConfidenceBand } } {
+): {
+  candidates: FoodCandidate[];
+  scanConfidence: { overall: number; band: import('../types/vision-contract').ConfidenceBand };
+} {
   const candidates: FoodCandidate[] = detections.map((detection, i) => {
     const match = matchDetection(detection, searchResultsByIndex[i] ?? []);
     const base = estimatePortion(detection, defaultServingGramsByIndex[i] ?? null);

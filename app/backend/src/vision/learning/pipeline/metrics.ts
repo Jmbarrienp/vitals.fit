@@ -100,7 +100,10 @@ export function buildScorecard(dataset: GroundTruthDataset, providerId: string):
 
     perFood: breakdown(proposals, (e) => e.foodName ?? 'sin-nombre'),
     perUser: breakdown(proposals, (e) => e.userId),
-    perCuisine: breakdown(proposals.filter((e) => e.cuisineCategory), (e) => e.cuisineCategory!),
+    perCuisine: breakdown(
+      proposals.filter((e) => e.cuisineCategory),
+      (e) => e.cuisineCategory!,
+    ),
     perConfidenceBand: breakdown(
       proposals.filter((e) => e.candidateConfidence != null),
       (e) => bandOf(e.candidateConfidence!),
@@ -109,7 +112,10 @@ export function buildScorecard(dataset: GroundTruthDataset, providerId: string):
   };
 }
 
-function breakdown(examples: GroundTruthExample[], keyOf: (e: GroundTruthExample) => string): Record<string, MetricSlice> {
+function breakdown(
+  examples: GroundTruthExample[],
+  keyOf: (e: GroundTruthExample) => string,
+): Record<string, MetricSlice> {
   const groups = new Map<string, GroundTruthExample[]>();
   for (const e of examples) {
     const key = keyOf(e);
@@ -125,7 +131,11 @@ function breakdown(examples: GroundTruthExample[], keyOf: (e: GroundTruthExample
     const errors = group
       .filter((e) => e.proposedGrams != null && e.confirmedGrams != null && e.confirmedGrams > 0)
       .map((e) => Math.abs(e.proposedGrams! - e.confirmedGrams!) / e.confirmedGrams!);
-    out[key] = { n: group.length, top1Accuracy: ratio(held.length, group.length), medianPortionErrorPct: median(errors) };
+    out[key] = {
+      n: group.length,
+      top1Accuracy: ratio(held.length, group.length),
+      medianPortionErrorPct: median(errors),
+    };
   }
   return out;
 }
@@ -143,7 +153,9 @@ function bandOf(confidence: number): string {
  * one metric, one truth. UNDONE counts as decided-and-not-accepted.
  */
 export function acceptance(scans: { status: string }[]): MaybeMetric {
-  const decided = scans.filter((s) => ['LOGGED', 'CONFIRMED', 'REJECTED', 'FALLBACK_MANUAL', 'UNDONE'].includes(s.status));
+  const decided = scans.filter((s) =>
+    ['LOGGED', 'CONFIRMED', 'REJECTED', 'FALLBACK_MANUAL', 'UNDONE'].includes(s.status),
+  );
   const accepted = decided.filter((s) => s.status === 'LOGGED' || s.status === 'CONFIRMED');
   return ratio(accepted.length, decided.length);
 }

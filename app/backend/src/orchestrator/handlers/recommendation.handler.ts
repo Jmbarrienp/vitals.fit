@@ -2,10 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NutritionStateService } from '../../nutrition-state/nutrition-state.service';
-import {
-  decidePlanAdjustment,
-  stateToInput,
-} from '../../recommendations/services/recommendation-engine';
+import { decidePlanAdjustment, stateToInput } from '../../recommendations/services/recommendation-engine';
 import { WeightUpdatedEvent } from '../events/progress.event';
 
 const PLAN_CHANGE_COOLDOWN_DAYS = 14;
@@ -36,13 +33,9 @@ export class RecommendationHandler {
       orderBy: { activeFrom: 'desc' },
     });
     if (lastHistory) {
-      const daysSince = Math.floor(
-        (Date.now() - lastHistory.activeFrom.getTime()) / (1000 * 60 * 60 * 24),
-      );
+      const daysSince = Math.floor((Date.now() - lastHistory.activeFrom.getTime()) / (1000 * 60 * 60 * 24));
       if (daysSince < PLAN_CHANGE_COOLDOWN_DAYS) {
-        this.logger.log(
-          `[recommendation-engine] cooldown active — ${daysSince}/${PLAN_CHANGE_COOLDOWN_DAYS} days`,
-        );
+        this.logger.log(`[recommendation-engine] cooldown active — ${daysSince}/${PLAN_CHANGE_COOLDOWN_DAYS} days`);
         return;
       }
     }
@@ -75,8 +68,6 @@ export class RecommendationHandler {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-    this.logger.log(
-      `[recommendation-engine] created ${decided.reason} (${decided.calorieAdjustment ?? 0} kcal)`,
-    );
+    this.logger.log(`[recommendation-engine] created ${decided.reason} (${decided.calorieAdjustment ?? 0} kcal)`);
   }
 }

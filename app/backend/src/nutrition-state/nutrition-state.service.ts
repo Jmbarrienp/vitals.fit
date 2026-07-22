@@ -21,11 +21,7 @@ export class NutritionStateService {
   }
 
   private isFresh(s: UserNutritionState): boolean {
-    return (
-      !s.stale &&
-      s.version === CURRENT_STATE_VERSION &&
-      Date.now() - s.computedAt.getTime() < STATE_TTL_MS
-    );
+    return !s.stale && s.version === CURRENT_STATE_VERSION && Date.now() - s.computedAt.getTime() < STATE_TTL_MS;
   }
 
   /**
@@ -50,10 +46,7 @@ export class NutritionStateService {
       this.prisma.recommendation.findFirst({
         where: {
           userId,
-          OR: [
-            { status: 'PENDING' },
-            { status: 'COMMITTED', commitExpiresAt: { gt: now } },
-          ],
+          OR: [{ status: 'PENDING' }, { status: 'COMMITTED', commitExpiresAt: { gt: now } }],
         },
         orderBy: { createdAt: 'desc' },
         select: { id: true, reason: true, messageForUser: true, type: true, priority: true, status: true },

@@ -109,14 +109,18 @@ export function decideGovernance(
 
   // ── 4. Does the advantage generalize, or is it one lucky slice? ──
   if (acrossModalities === false || acrossUsers === false) {
-    if (acrossModalities === false) reasons.push('la ventaja NO generaliza entre modalidades — mejora en unas y regresa en otras');
-    if (acrossUsers === false) reasons.push('la ventaja NO generaliza entre usuarios — parece concentrada en un segmento');
+    if (acrossModalities === false)
+      reasons.push('la ventaja NO generaliza entre modalidades — mejora en unas y regresa en otras');
+    if (acrossUsers === false)
+      reasons.push('la ventaja NO generaliza entre usuarios — parece concentrada en un segmento');
     return build('HOLD');
   }
 
   // ── 5. Is it deployable, and is the gain worth its price? ──
   if (ops?.challengerAvailability != null && ops.challengerAvailability < MIN_CHALLENGER_AVAILABILITY) {
-    reasons.push(`disponibilidad del challenger ${pct(ops.challengerAvailability)} < ${pct(MIN_CHALLENGER_AVAILABILITY)} — más preciso pero no desplegable`);
+    reasons.push(
+      `disponibilidad del challenger ${pct(ops.challengerAvailability)} < ${pct(MIN_CHALLENGER_AVAILABILITY)} — más preciso pero no desplegable`,
+    );
     return build('HOLD');
   }
   if (
@@ -124,7 +128,9 @@ export function decideGovernance(
     ops?.incumbentMeanLatencyMs != null &&
     ops.challengerMeanLatencyMs > ops.incumbentMeanLatencyMs * MAX_LATENCY_MULTIPLE
   ) {
-    reasons.push(`la latencia sube de ${ms(ops.incumbentMeanLatencyMs)} a ${ms(ops.challengerMeanLatencyMs)} (>${MAX_LATENCY_MULTIPLE}×) — la ganancia no compensa la espera del usuario`);
+    reasons.push(
+      `la latencia sube de ${ms(ops.incumbentMeanLatencyMs)} a ${ms(ops.challengerMeanLatencyMs)} (>${MAX_LATENCY_MULTIPLE}×) — la ganancia no compensa la espera del usuario`,
+    );
     return build('HOLD');
   }
   if (
@@ -132,12 +138,17 @@ export function decideGovernance(
     ops?.incumbentMeanTokens != null &&
     ops.challengerMeanTokens > ops.incumbentMeanTokens * MAX_TOKEN_MULTIPLE
   ) {
-    reasons.push(`el coste por scan sube de ${Math.round(ops.incumbentMeanTokens)} a ${Math.round(ops.challengerMeanTokens)} tokens (>${MAX_TOKEN_MULTIPLE}×) — evaluar si la precisión lo justifica`);
+    reasons.push(
+      `el coste por scan sube de ${Math.round(ops.incumbentMeanTokens)} a ${Math.round(ops.challengerMeanTokens)} tokens (>${MAX_TOKEN_MULTIPLE}×) — evaluar si la precisión lo justifica`,
+    );
     return build('HOLD');
   }
 
-  reasons.push('la ventaja generaliza, el challenger es desplegable, y el coste y la latencia se mantienen dentro de los límites');
-  if (drifting) reasons.push('además, el incumbente está a la deriva — la promoción también resuelve un problema activo');
+  reasons.push(
+    'la ventaja generaliza, el challenger es desplegable, y el coste y la latencia se mantienen dentro de los límites',
+  );
+  if (drifting)
+    reasons.push('además, el incumbente está a la deriva — la promoción también resuelve un problema activo');
   return build('PROMOTE');
 }
 
@@ -162,9 +173,17 @@ function checklist(action: GovernanceAction, incumbentId: string, challengerId: 
         `☐ acumular evidencia en sombra de un challenger antes de reemplazar`,
       ];
     case 'HOLD':
-      return [...base, `☐ seguir acumulando evidencia en sombra`, `☐ re-evaluar cuando la ventana cubra las modalidades y segmentos que hoy regresan`];
+      return [
+        ...base,
+        `☐ seguir acumulando evidencia en sombra`,
+        `☐ re-evaluar cuando la ventana cubra las modalidades y segmentos que hoy regresan`,
+      ];
     case 'REQUIRE_MORE_DATA':
-      return [...base, `☐ verificar SHADOW_CHALLENGER_PROVIDER y SHADOW_SAMPLE_RATE`, `☐ dejar correr hasta alcanzar ${MIN_PAIRED_SCANS} scans pareados`];
+      return [
+        ...base,
+        `☐ verificar SHADOW_CHALLENGER_PROVIDER y SHADOW_SAMPLE_RATE`,
+        `☐ dejar correr hasta alcanzar ${MIN_PAIRED_SCANS} scans pareados`,
+      ];
     default:
       return [...base, `☐ ninguna acción requerida — '${incumbentId}' sigue siendo la elección correcta`];
   }

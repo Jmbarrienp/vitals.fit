@@ -76,7 +76,8 @@ export function decideCanary(
   if (riskMedium) {
     return {
       recommendation: 'STAY',
-      reason: 'permanecer: las señales permiten avanzar pero el riesgo global es MEDIO — mantener posición y seguir observando la ventana sugerida antes de subir',
+      reason:
+        'permanecer: las señales permiten avanzar pero el riesgo global es MEDIO — mantener posición y seguir observando la ventana sugerida antes de subir',
       readiness: 'HOLDING',
     };
   }
@@ -112,12 +113,26 @@ export function buildCanaryPlan(
   const requiredConditions = gatingRung?.advanceConditions ?? [];
   const blockingConditions = collectBlockers(recommendation, currentStage, rollback, promotion);
 
-  const advance = signal(recommendation === 'ADVANCE',
-    recommendation === 'ADVANCE' ? 'las señales apoyan avanzar al siguiente peldaño' : `no se recomienda avanzar (${recommendation})`);
-  const hold = signal(recommendation === 'HOLD' || recommendation === 'STAY' || recommendation === 'PAUSE',
-    recommendation === 'STAY' ? 'mantener posición y seguir observando' : recommendation === 'PAUSE' ? 'pausar por degradación leve' : recommendation === 'HOLD' ? 'sin promoción viable para canario' : 'no se recomienda mantener');
-  const rollbackSignal = signal(recommendation === 'ROLLBACK',
-    recommendation === 'ROLLBACK' ? rollback.rollbackReason : 'no se recomienda rollback en este momento');
+  const advance = signal(
+    recommendation === 'ADVANCE',
+    recommendation === 'ADVANCE'
+      ? 'las señales apoyan avanzar al siguiente peldaño'
+      : `no se recomienda avanzar (${recommendation})`,
+  );
+  const hold = signal(
+    recommendation === 'HOLD' || recommendation === 'STAY' || recommendation === 'PAUSE',
+    recommendation === 'STAY'
+      ? 'mantener posición y seguir observando'
+      : recommendation === 'PAUSE'
+        ? 'pausar por degradación leve'
+        : recommendation === 'HOLD'
+          ? 'sin promoción viable para canario'
+          : 'no se recomienda mantener',
+  );
+  const rollbackSignal = signal(
+    recommendation === 'ROLLBACK',
+    recommendation === 'ROLLBACK' ? rollback.rollbackReason : 'no se recomienda rollback en este momento',
+  );
 
   return {
     version: CANARY_PLAN_VERSION,
@@ -135,8 +150,16 @@ export function buildCanaryPlan(
     blockingConditions,
     monitoringChecklist: monitoringChecklist(currentStage, rollback),
     verificationChecklist: verificationChecklist(recommendation, promotion, rollback),
-    promotionReference: { readiness: promotion.readiness, decision: promotion.decision, candidateProvider: promotion.candidateProvider },
-    rollbackReference: { readiness: rollback.readiness, severity: rollback.rollbackSeverity, priority: rollback.rollbackPriority },
+    promotionReference: {
+      readiness: promotion.readiness,
+      decision: promotion.decision,
+      candidateProvider: promotion.candidateProvider,
+    },
+    rollbackReference: {
+      readiness: rollback.readiness,
+      severity: rollback.rollbackSeverity,
+      priority: rollback.rollbackPriority,
+    },
     estimatedExposure: {
       currentPercent: clampedPercent,
       nextPercent: nextStage?.percent ?? null,
@@ -174,7 +197,8 @@ function observedIndicators(recommendation: CanaryRecommendation, rollback: Roll
   const out = [`recomendación actual: ${recommendation}`];
   if (rollback.degradedHealth.length > 0) out.push(...rollback.degradedHealth.map((d) => `salud: ${d}`));
   else out.push('salud en verde');
-  if (rollback.readiness !== 'NOT_REQUIRED') out.push(`rollback ${rollback.readiness} (severidad ${rollback.rollbackSeverity})`);
+  if (rollback.readiness !== 'NOT_REQUIRED')
+    out.push(`rollback ${rollback.readiness} (severidad ${rollback.rollbackSeverity})`);
   return out;
 }
 
@@ -196,14 +220,42 @@ function collectBlockers(
 function monitoringChecklist(currentStage: CanaryStage | null, rollback: RollbackExecutionPlan): ChecklistItem[] {
   const healthy = rollback.degradedHealth.length === 0;
   return [
-    item('SAFETY', 'Sin señal de rollback activa', rollback.readiness === 'NOT_REQUIRED' ? 'PASS' : 'FAIL',
-      rollback.readiness === 'NOT_REQUIRED' ? 'el plan de rollback no reporta degradación' : `rollback ${rollback.readiness}: ${rollback.rollbackReason}`, 'CRITICAL', 'ON_CALL'),
-    item('MONITORING', 'Salud en verde en el peldaño actual', healthy ? 'PASS' : 'FAIL',
-      healthy ? 'sin métricas de salud degradadas' : rollback.degradedHealth.join('; '), 'HIGH', 'ON_CALL'),
-    item('MONITORING', 'Ventana de observación del peldaño', currentStage ? 'PENDING' : 'NOT_APPLICABLE',
-      currentStage ? `observar al menos ${currentStage.suggestedDurationHours}h en ${currentStage.percent}% antes de avanzar (el motor no rastrea el tiempo en etapa)` : 'aún no hay rollout activo', 'MEDIUM', 'OPERATIONS'),
-    item('STATISTICAL', 'Evidencia de riesgo estable', 'PENDING',
-      'confirmar que el riesgo global no ha subido desde el último peldaño', 'MEDIUM', 'ML'),
+    item(
+      'SAFETY',
+      'Sin señal de rollback activa',
+      rollback.readiness === 'NOT_REQUIRED' ? 'PASS' : 'FAIL',
+      rollback.readiness === 'NOT_REQUIRED'
+        ? 'el plan de rollback no reporta degradación'
+        : `rollback ${rollback.readiness}: ${rollback.rollbackReason}`,
+      'CRITICAL',
+      'ON_CALL',
+    ),
+    item(
+      'MONITORING',
+      'Salud en verde en el peldaño actual',
+      healthy ? 'PASS' : 'FAIL',
+      healthy ? 'sin métricas de salud degradadas' : rollback.degradedHealth.join('; '),
+      'HIGH',
+      'ON_CALL',
+    ),
+    item(
+      'MONITORING',
+      'Ventana de observación del peldaño',
+      currentStage ? 'PENDING' : 'NOT_APPLICABLE',
+      currentStage
+        ? `observar al menos ${currentStage.suggestedDurationHours}h en ${currentStage.percent}% antes de avanzar (el motor no rastrea el tiempo en etapa)`
+        : 'aún no hay rollout activo',
+      'MEDIUM',
+      'OPERATIONS',
+    ),
+    item(
+      'STATISTICAL',
+      'Evidencia de riesgo estable',
+      'PENDING',
+      'confirmar que el riesgo global no ha subido desde el último peldaño',
+      'MEDIUM',
+      'ML',
+    ),
   ];
 }
 
@@ -213,14 +265,38 @@ function verificationChecklist(
   rollback: RollbackExecutionPlan,
 ): ChecklistItem[] {
   return [
-    item('OPERATIONAL', 'Mecanismo de enrutamiento por porcentaje disponible', 'PENDING',
-      'confirmar que el sistema de rollout gradual puede fijar el nuevo porcentaje (fuera de este slice)', 'HIGH', 'OPERATIONS'),
-    item('TECHNICAL', 'Referencia de promoción vigente', promotion.readiness === 'READY' ? 'PASS' : promotion.readiness === 'NOT_APPLICABLE' ? 'NOT_APPLICABLE' : 'FAIL',
-      `plan de promoción: ${promotion.readiness} (decisión ${promotion.decision})`, 'HIGH', 'ENGINEERING'),
-    item('SAFETY', 'Plan de rollback listo si se necesita', 'PASS',
-      `el plan de rollback está siempre disponible (estado actual: ${rollback.readiness})`, 'CRITICAL', 'ON_CALL'),
-    item('OPERATIONAL', 'Recomendación entendida por el operador', 'PENDING',
-      `la recomendación es ${recommendation} — confirmar que el operador la ejecuta manualmente (el motor no actúa)`, 'MEDIUM', 'OPERATIONS'),
+    item(
+      'OPERATIONAL',
+      'Mecanismo de enrutamiento por porcentaje disponible',
+      'PENDING',
+      'confirmar que el sistema de rollout gradual puede fijar el nuevo porcentaje (fuera de este slice)',
+      'HIGH',
+      'OPERATIONS',
+    ),
+    item(
+      'TECHNICAL',
+      'Referencia de promoción vigente',
+      promotion.readiness === 'READY' ? 'PASS' : promotion.readiness === 'NOT_APPLICABLE' ? 'NOT_APPLICABLE' : 'FAIL',
+      `plan de promoción: ${promotion.readiness} (decisión ${promotion.decision})`,
+      'HIGH',
+      'ENGINEERING',
+    ),
+    item(
+      'SAFETY',
+      'Plan de rollback listo si se necesita',
+      'PASS',
+      `el plan de rollback está siempre disponible (estado actual: ${rollback.readiness})`,
+      'CRITICAL',
+      'ON_CALL',
+    ),
+    item(
+      'OPERATIONAL',
+      'Recomendación entendida por el operador',
+      'PENDING',
+      `la recomendación es ${recommendation} — confirmar que el operador la ejecuta manualmente (el motor no actúa)`,
+      'MEDIUM',
+      'OPERATIONS',
+    ),
   ];
 }
 

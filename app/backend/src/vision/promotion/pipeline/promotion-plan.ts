@@ -1,5 +1,10 @@
 import { GovernanceRecommendation } from '../../governance/types/governance-contract';
-import { MAX_LATENCY_MULTIPLE, MAX_TOKEN_MULTIPLE, MIN_CHALLENGER_AVAILABILITY, MIN_PAIRED_SCANS } from '../../governance/pipeline/governance-decision';
+import {
+  MAX_LATENCY_MULTIPLE,
+  MAX_TOKEN_MULTIPLE,
+  MIN_CHALLENGER_AVAILABILITY,
+  MIN_PAIRED_SCANS,
+} from '../../governance/pipeline/governance-decision';
 import { GatesReport, HealthReport, RiskAssessment, RolloutStatus } from '../../rollout/types/rollout-contract';
 import { HEALTH_MAX_ECE, HEALTH_MAX_PROVIDER_FAILURE_RATE, HEALTH_MAX_UNDO_RATE } from '../../rollout/pipeline/health';
 import {
@@ -57,7 +62,8 @@ export function buildPromotionPlan(
   const rolloutStrategy: RolloutStage[] = LADDER.map((rung, i) => ({
     percent: rung.percent,
     suggestedDurationHours: rung.hours,
-    advanceConditions: i === LADDER.length - 1 ? ['última etapa: monitorear en 100% antes de retirar la bandera de reversión'] : advance,
+    advanceConditions:
+      i === LADDER.length - 1 ? ['última etapa: monitorear en 100% antes de retirar la bandera de reversión'] : advance,
     stopConditions: stop,
     rollbackConditions: rollback,
   }));
@@ -74,7 +80,11 @@ export function buildPromotionPlan(
     statisticalEvidence: evidence,
     estimatedRisk: {
       overall: risk.overall,
-      dimensions: risk.dimensions.map((d) => ({ dimension: d.dimension, level: d.level, topEvidence: d.evidence[0] ?? '' })),
+      dimensions: risk.dimensions.map((d) => ({
+        dimension: d.dimension,
+        level: d.level,
+        topEvidence: d.evidence[0] ?? '',
+      })),
     },
     rolloutStrategy,
     // A blocked plan starts nowhere: the ladder is documented, but the entry rung is 0.
@@ -102,7 +112,10 @@ function deriveReadiness(
   gates: GatesReport,
 ): { readiness: PromotionReadiness; blockingReasons: string[] } {
   if (!rec.challengerId) {
-    return { readiness: 'NOT_APPLICABLE', blockingReasons: ['no hay proveedor candidato con evidencia en esta ventana'] };
+    return {
+      readiness: 'NOT_APPLICABLE',
+      blockingReasons: ['no hay proveedor candidato con evidencia en esta ventana'],
+    };
   }
   const blocking: string[] = [];
   if (rec.action !== 'PROMOTE') {
@@ -116,7 +129,9 @@ function deriveReadiness(
     const worst = risk.dimensions.find((d) => d.level === 'HIGH');
     blocking.push(`riesgo global HIGH (${worst?.dimension ?? '—'}): ${worst?.evidence[0] ?? ''}`);
   }
-  return blocking.length === 0 ? { readiness: 'READY', blockingReasons: [] } : { readiness: 'BLOCKED', blockingReasons: blocking };
+  return blocking.length === 0
+    ? { readiness: 'READY', blockingReasons: [] }
+    : { readiness: 'BLOCKED', blockingReasons: blocking };
 }
 
 function statisticalEvidence(rec: GovernanceRecommendation): StatisticalEvidence {
@@ -176,14 +191,54 @@ function rollbackConditions(): string[] {
 function executionSteps(current: string, candidate: string | null): ExecutionStep[] {
   const c = candidate ?? 'CANDIDATO';
   return [
-    { order: 1, action: 'Verificar registro', detail: `confirmar que '${c}' está registrado en el VisionProviderRegistry y con credencial en producción`, owner: 'ENGINEERING' },
-    { order: 2, action: 'Verificación previa', detail: 'correr smoke:vision y smoke:governance; confirmar builds y tsc limpios', owner: 'ENGINEERING' },
-    { order: 3, action: 'Aprobaciones', detail: 'recoger las firmas del approvalChecklist antes de tocar nada', owner: 'PRODUCT' },
-    { order: 4, action: 'Iniciar en 5%', detail: `enrutar el 5% del tráfico de la modalidad a '${c}' mediante el mecanismo de rollout gradual (fuera de este slice)`, owner: 'OPERATIONS' },
-    { order: 5, action: 'Observar', detail: 'vigilar el monitoringChecklist durante la duración sugerida de cada etapa antes de avanzar', owner: 'ON_CALL' },
-    { order: 6, action: 'Escalar por la escalera', detail: '5% → 10% → 25% → 50% → 100%, avanzando solo cuando se cumplan las advanceConditions', owner: 'OPERATIONS' },
-    { order: 7, action: 'Promover como default', detail: `una vez estable en 100%, fijar VISION_PROVIDER=${c} y retirar la bandera de reversión`, owner: 'ENGINEERING' },
-    { order: 8, action: 'Recordatorio de calibración', detail: `la curva de calibración de '${c}' arranca vacía: auto-accept deja de graduar hasta que acumule evidencia propia (V3.6)`, owner: 'ML' },
+    {
+      order: 1,
+      action: 'Verificar registro',
+      detail: `confirmar que '${c}' está registrado en el VisionProviderRegistry y con credencial en producción`,
+      owner: 'ENGINEERING',
+    },
+    {
+      order: 2,
+      action: 'Verificación previa',
+      detail: 'correr smoke:vision y smoke:governance; confirmar builds y tsc limpios',
+      owner: 'ENGINEERING',
+    },
+    {
+      order: 3,
+      action: 'Aprobaciones',
+      detail: 'recoger las firmas del approvalChecklist antes de tocar nada',
+      owner: 'PRODUCT',
+    },
+    {
+      order: 4,
+      action: 'Iniciar en 5%',
+      detail: `enrutar el 5% del tráfico de la modalidad a '${c}' mediante el mecanismo de rollout gradual (fuera de este slice)`,
+      owner: 'OPERATIONS',
+    },
+    {
+      order: 5,
+      action: 'Observar',
+      detail: 'vigilar el monitoringChecklist durante la duración sugerida de cada etapa antes de avanzar',
+      owner: 'ON_CALL',
+    },
+    {
+      order: 6,
+      action: 'Escalar por la escalera',
+      detail: '5% → 10% → 25% → 50% → 100%, avanzando solo cuando se cumplan las advanceConditions',
+      owner: 'OPERATIONS',
+    },
+    {
+      order: 7,
+      action: 'Promover como default',
+      detail: `una vez estable en 100%, fijar VISION_PROVIDER=${c} y retirar la bandera de reversión`,
+      owner: 'ENGINEERING',
+    },
+    {
+      order: 8,
+      action: 'Recordatorio de calibración',
+      detail: `la curva de calibración de '${c}' arranca vacía: auto-accept deja de graduar hasta que acumule evidencia propia (V3.6)`,
+      owner: 'ML',
+    },
   ];
 }
 
@@ -191,59 +246,181 @@ function rollbackSteps(current: string, candidate: string | null): ExecutionStep
   const c = candidate ?? 'CANDIDATO';
   return [
     { order: 1, action: 'Detener el avance', detail: 'congelar el rollout en el porcentaje actual', owner: 'ON_CALL' },
-    { order: 2, action: 'Revertir enrutamiento', detail: `devolver el 100% del tráfico a '${current}'`, owner: 'OPERATIONS' },
+    {
+      order: 2,
+      action: 'Revertir enrutamiento',
+      detail: `devolver el 100% del tráfico a '${current}'`,
+      owner: 'OPERATIONS',
+    },
     { order: 3, action: 'Restaurar default', detail: `confirmar VISION_PROVIDER=${current}`, owner: 'ENGINEERING' },
-    { order: 4, action: 'Preservar evidencia', detail: `conservar las corridas en sombra de '${c}' — son evidencia append-only para el diagnóstico`, owner: 'ML' },
-    { order: 5, action: 'Post-mortem', detail: 'documentar el criterio de rollback que disparó y por qué la evidencia previa no lo anticipó', owner: 'PRODUCT' },
+    {
+      order: 4,
+      action: 'Preservar evidencia',
+      detail: `conservar las corridas en sombra de '${c}' — son evidencia append-only para el diagnóstico`,
+      owner: 'ML',
+    },
+    {
+      order: 5,
+      action: 'Post-mortem',
+      detail: 'documentar el criterio de rollback que disparó y por qué la evidencia previa no lo anticipó',
+      owner: 'PRODUCT',
+    },
   ];
 }
 
 function monitoringChecklist(health: HealthReport, gates: GatesReport): ChecklistItem[] {
   const rollback = gates.gates.find((g) => g.id === 'ROLLBACK_REQUIRED');
   return [
-    item('OBSERVABILITY', 'Tasa de undo bajo umbral', metricStatus(health.undoRate, HEALTH_MAX_UNDO_RATE),
-      `undo actual ${pct(health.undoRate)} vs umbral ${pct(HEALTH_MAX_UNDO_RATE)}`, 'CRITICAL', 'ON_CALL'),
-    item('OBSERVABILITY', 'Fallos de proveedor bajo umbral', metricStatus(health.providerFailureRate, HEALTH_MAX_PROVIDER_FAILURE_RATE),
-      `fallos ${pct(health.providerFailureRate)} vs umbral ${pct(HEALTH_MAX_PROVIDER_FAILURE_RATE)}`, 'CRITICAL', 'ON_CALL'),
-    item('OBSERVABILITY', 'Calibración honesta', metricStatus(health.calibration.currentEce, HEALTH_MAX_ECE),
-      `ECE ${health.calibration.currentEce ?? 'n/d'} vs umbral ${HEALTH_MAX_ECE}`, 'HIGH', 'ML'),
-    item('OBSERVABILITY', 'Latencia observada', health.meanLatencyMs == null ? 'PENDING' : 'PASS',
-      `latencia media ${health.meanLatencyMs == null ? 'n/d' : Math.round(health.meanLatencyMs) + 'ms'}`, 'MEDIUM', 'ON_CALL'),
-    item('SAFETY', 'Sin señal de rollback', rollback?.status === 'FAIL' ? 'FAIL' : 'PASS',
-      rollback?.reasons[0] ?? 'la puerta ROLLBACK_REQUIRED no está disparada', 'CRITICAL', 'ON_CALL'),
-    item('SAFETY', 'Falsos positivos bajo control', health.falsePositives > 0 ? 'FAIL' : 'PASS',
-      `${health.falsePositives} auto-aceptaciones deshechas en la ventana`, 'HIGH', 'ML'),
+    item(
+      'OBSERVABILITY',
+      'Tasa de undo bajo umbral',
+      metricStatus(health.undoRate, HEALTH_MAX_UNDO_RATE),
+      `undo actual ${pct(health.undoRate)} vs umbral ${pct(HEALTH_MAX_UNDO_RATE)}`,
+      'CRITICAL',
+      'ON_CALL',
+    ),
+    item(
+      'OBSERVABILITY',
+      'Fallos de proveedor bajo umbral',
+      metricStatus(health.providerFailureRate, HEALTH_MAX_PROVIDER_FAILURE_RATE),
+      `fallos ${pct(health.providerFailureRate)} vs umbral ${pct(HEALTH_MAX_PROVIDER_FAILURE_RATE)}`,
+      'CRITICAL',
+      'ON_CALL',
+    ),
+    item(
+      'OBSERVABILITY',
+      'Calibración honesta',
+      metricStatus(health.calibration.currentEce, HEALTH_MAX_ECE),
+      `ECE ${health.calibration.currentEce ?? 'n/d'} vs umbral ${HEALTH_MAX_ECE}`,
+      'HIGH',
+      'ML',
+    ),
+    item(
+      'OBSERVABILITY',
+      'Latencia observada',
+      health.meanLatencyMs == null ? 'PENDING' : 'PASS',
+      `latencia media ${health.meanLatencyMs == null ? 'n/d' : Math.round(health.meanLatencyMs) + 'ms'}`,
+      'MEDIUM',
+      'ON_CALL',
+    ),
+    item(
+      'SAFETY',
+      'Sin señal de rollback',
+      rollback?.status === 'FAIL' ? 'FAIL' : 'PASS',
+      rollback?.reasons[0] ?? 'la puerta ROLLBACK_REQUIRED no está disparada',
+      'CRITICAL',
+      'ON_CALL',
+    ),
+    item(
+      'SAFETY',
+      'Falsos positivos bajo control',
+      health.falsePositives > 0 ? 'FAIL' : 'PASS',
+      `${health.falsePositives} auto-aceptaciones deshechas en la ventana`,
+      'HIGH',
+      'ML',
+    ),
   ];
 }
 
 function validationChecklist(rec: GovernanceRecommendation, gates: GatesReport): ChecklistItem[] {
   const provider = gates.gates.find((g) => g.id === 'PROVIDER_READY');
   return [
-    item('STATISTICAL', 'Evidencia pareada suficiente', rec.evidence.pairedScans >= MIN_PAIRED_SCANS ? 'PASS' : 'FAIL',
-      `${rec.evidence.pairedScans}/${MIN_PAIRED_SCANS} scans pareados`, 'CRITICAL', 'ML'),
-    item('STATISTICAL', 'Ventaja estadísticamente significativa', rec.action === 'PROMOTE' || rec.action === 'DEMOTE' ? 'PASS' : (significantEnough(rec) ? 'PASS' : 'FAIL'),
-      `McNemar z=${rec.evidence.mcNemarZ ?? 'n/d'}, IC top-1 ${ci(rec.evidence.top1DeltaCi)}`, 'CRITICAL', 'ML'),
-    item('STATISTICAL', 'La ventaja generaliza entre modalidades', boolStatus(rec.evidence.generalizesAcrossModalities),
-      generalizeText(rec.evidence.generalizesAcrossModalities), 'HIGH', 'ML'),
-    item('STATISTICAL', 'La ventaja generaliza entre usuarios', boolStatus(rec.evidence.generalizesAcrossUsers),
-      generalizeText(rec.evidence.generalizesAcrossUsers), 'HIGH', 'ML'),
-    item('TECHNICAL', 'Proveedor candidato listo', provider?.status === 'PASS' ? 'PASS' : provider?.status === 'FAIL' ? 'FAIL' : 'PENDING',
-      provider?.reasons[0] ?? 'sin veredicto de la puerta PROVIDER_READY', 'CRITICAL', 'ENGINEERING'),
-    item('OPERATIONAL', 'Coste y latencia dentro de límites', rec.evidence.latencyDeltaMs != null && rec.evidence.latencyDeltaMs <= 0 ? 'PASS' : 'PENDING',
-      `Δlatencia ${rec.evidence.latencyDeltaMs ?? 'n/d'}ms, Δtokens ${rec.evidence.tokenDeltaPerScan ?? 'n/d'}/scan`, 'MEDIUM', 'OPERATIONS'),
-    item('PRODUCT', 'Impacto en el usuario entendido', 'PENDING',
-      'confirmar que la promoción no cambia la experiencia visible más allá de la calidad de reconocimiento', 'MEDIUM', 'PRODUCT'),
+    item(
+      'STATISTICAL',
+      'Evidencia pareada suficiente',
+      rec.evidence.pairedScans >= MIN_PAIRED_SCANS ? 'PASS' : 'FAIL',
+      `${rec.evidence.pairedScans}/${MIN_PAIRED_SCANS} scans pareados`,
+      'CRITICAL',
+      'ML',
+    ),
+    item(
+      'STATISTICAL',
+      'Ventaja estadísticamente significativa',
+      rec.action === 'PROMOTE' || rec.action === 'DEMOTE' ? 'PASS' : significantEnough(rec) ? 'PASS' : 'FAIL',
+      `McNemar z=${rec.evidence.mcNemarZ ?? 'n/d'}, IC top-1 ${ci(rec.evidence.top1DeltaCi)}`,
+      'CRITICAL',
+      'ML',
+    ),
+    item(
+      'STATISTICAL',
+      'La ventaja generaliza entre modalidades',
+      boolStatus(rec.evidence.generalizesAcrossModalities),
+      generalizeText(rec.evidence.generalizesAcrossModalities),
+      'HIGH',
+      'ML',
+    ),
+    item(
+      'STATISTICAL',
+      'La ventaja generaliza entre usuarios',
+      boolStatus(rec.evidence.generalizesAcrossUsers),
+      generalizeText(rec.evidence.generalizesAcrossUsers),
+      'HIGH',
+      'ML',
+    ),
+    item(
+      'TECHNICAL',
+      'Proveedor candidato listo',
+      provider?.status === 'PASS' ? 'PASS' : provider?.status === 'FAIL' ? 'FAIL' : 'PENDING',
+      provider?.reasons[0] ?? 'sin veredicto de la puerta PROVIDER_READY',
+      'CRITICAL',
+      'ENGINEERING',
+    ),
+    item(
+      'OPERATIONAL',
+      'Coste y latencia dentro de límites',
+      rec.evidence.latencyDeltaMs != null && rec.evidence.latencyDeltaMs <= 0 ? 'PASS' : 'PENDING',
+      `Δlatencia ${rec.evidence.latencyDeltaMs ?? 'n/d'}ms, Δtokens ${rec.evidence.tokenDeltaPerScan ?? 'n/d'}/scan`,
+      'MEDIUM',
+      'OPERATIONS',
+    ),
+    item(
+      'PRODUCT',
+      'Impacto en el usuario entendido',
+      'PENDING',
+      'confirmar que la promoción no cambia la experiencia visible más allá de la calidad de reconocimiento',
+      'MEDIUM',
+      'PRODUCT',
+    ),
   ];
 }
 
 function approvalChecklist(readiness: PromotionReadiness, risk: RiskAssessment): ChecklistItem[] {
   const highRisk = risk.overall === 'HIGH';
   return [
-    item('PRODUCT', 'Aprobación de producto', 'PENDING', 'firma requerida antes de cualquier cambio de tráfico', 'CRITICAL', 'PRODUCT'),
-    item('TECHNICAL', 'Aprobación de ingeniería', 'PENDING', 'plan de reversión revisado y probado', 'CRITICAL', 'ENGINEERING'),
-    item('STATISTICAL', 'Aprobación de ML', 'PENDING', 'evidencia estadística y de calibración revisada', 'CRITICAL', 'ML'),
-    item('SAFETY', 'Guardia de seguridad', readiness === 'READY' ? 'PENDING' : 'FAIL',
-      readiness === 'READY' ? 'el plan está listo; confirmar cobertura de on-call durante el rollout' : 'el plan está BLOQUEADO — no puede aprobarse', highRisk ? 'CRITICAL' : 'HIGH', 'ON_CALL'),
+    item(
+      'PRODUCT',
+      'Aprobación de producto',
+      'PENDING',
+      'firma requerida antes de cualquier cambio de tráfico',
+      'CRITICAL',
+      'PRODUCT',
+    ),
+    item(
+      'TECHNICAL',
+      'Aprobación de ingeniería',
+      'PENDING',
+      'plan de reversión revisado y probado',
+      'CRITICAL',
+      'ENGINEERING',
+    ),
+    item(
+      'STATISTICAL',
+      'Aprobación de ML',
+      'PENDING',
+      'evidencia estadística y de calibración revisada',
+      'CRITICAL',
+      'ML',
+    ),
+    item(
+      'SAFETY',
+      'Guardia de seguridad',
+      readiness === 'READY' ? 'PENDING' : 'FAIL',
+      readiness === 'READY'
+        ? 'el plan está listo; confirmar cobertura de on-call durante el rollout'
+        : 'el plan está BLOQUEADO — no puede aprobarse',
+      highRisk ? 'CRITICAL' : 'HIGH',
+      'ON_CALL',
+    ),
   ];
 }
 
@@ -277,7 +454,9 @@ function boolStatus(x: boolean | null): ChecklistItem['status'] {
 
 function generalizeText(x: boolean | null): string {
   if (x == null) return 'evidencia insuficiente para juzgar generalización (se necesitan ≥2 buckets)';
-  return x ? 'la ventaja se sostiene en la mayoría de los buckets' : 'la ventaja NO generaliza — concentrada en un subconjunto';
+  return x
+    ? 'la ventaja se sostiene en la mayoría de los buckets'
+    : 'la ventaja NO generaliza — concentrada en un subconjunto';
 }
 
 function dedupe(xs: string[]): string[] {

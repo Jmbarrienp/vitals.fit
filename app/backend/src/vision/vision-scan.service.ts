@@ -30,12 +30,7 @@ import {
   VisionScanFallbackEvent,
   VisionScanProposedEvent,
 } from './vision.events';
-import {
-  ScanConfirmation,
-  ScanSource,
-  VISION_CONTRACT_VERSION,
-  VisionScanProposal,
-} from './types/vision-contract';
+import { ScanConfirmation, ScanSource, VISION_CONTRACT_VERSION, VisionScanProposal } from './types/vision-contract';
 
 const PROPOSAL_TTL_MS = 30 * 60 * 1000; // 30 min to confirm before lazy expiry
 /**
@@ -330,7 +325,14 @@ export class VisionScanService {
           };
           await this.prisma.visionScan.update({
             where: { id: scan.id },
-            data: { status: 'PROPOSED', providerId, providerVersion, proposal: proposal as any, scanConfidence: 0, processedAt: new Date() },
+            data: {
+              status: 'PROPOSED',
+              providerId,
+              providerVersion,
+              proposal: proposal as any,
+              scanConfidence: 0,
+              processedAt: new Date(),
+            },
           });
           this.events.emit(
             VISION_EVENTS.PROPOSED,
@@ -542,7 +544,11 @@ export class VisionScanService {
    * Fails SOFT in every direction: any problem here returns the plain proposal,
    * which is exactly the pre-V3.6 experience. Trust may only remove friction.
    */
-  private async applyTrust(userId: string, proposal: VisionScanProposal, providerId: string): Promise<VisionScanProposal> {
+  private async applyTrust(
+    userId: string,
+    proposal: VisionScanProposal,
+    providerId: string,
+  ): Promise<VisionScanProposal> {
     let decision: AutoAcceptDecision;
     try {
       decision = await this.trust.decide(userId, proposal, providerId);
@@ -657,7 +663,10 @@ export class VisionScanService {
       throw new BadRequestException('At least one item is required to confirm a scan.');
     }
 
-    await this.prisma.visionScan.update({ where: { id: scan.id }, data: { status: 'CONFIRMED', confirmedAt: new Date() } });
+    await this.prisma.visionScan.update({
+      where: { id: scan.id },
+      data: { status: 'CONFIRMED', confirmedAt: new Date() },
+    });
 
     const result = await this.logs.logMeal(userId, {
       mealType: confirmation.mealType as any,
@@ -678,7 +687,10 @@ export class VisionScanService {
       orderBy: { loggedAt: 'desc' },
     });
     if (loggedMeal) {
-      await this.prisma.loggedMeal.update({ where: { id: loggedMeal.id }, data: { source: 'vision', visionScanId: scan.id } });
+      await this.prisma.loggedMeal.update({
+        where: { id: loggedMeal.id },
+        data: { source: 'vision', visionScanId: scan.id },
+      });
     }
     await this.prisma.visionScan.update({ where: { id: scan.id }, data: { status: 'LOGGED' } });
 

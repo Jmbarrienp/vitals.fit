@@ -1,0 +1,150 @@
+name: CI
+
+# The quality gate. Until V5.4 nothing ran automatically — the 20 smoke suites
+# existed but depended on a human remembering to run them. This makes the
+# process depend on tooling instead of discipline.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+# A new push to the same branch cancels the previous run: CI minutes are spent
+# on the current state of the code, not on superseded commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Smoke suites spin up their own embedded Postgres, but the config validator
+  # runs at import time in some paths and needs a syntactically valid secret.
+  JWT_SECRET: ci-only-secret-not-used-for-anything-real-0123456789
+  NODE_ENV: test
+
+jobs:
+  # ── Fast feedback: everything that does not need a database ──
+  static:
+    name: Lint · Format · Typecheck · Boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/backend/package-lock.json
+
+      - name: Install backend
+        working-directory: app/backend
+        # The repo has known, documented peer conflicts (typescript-eslint wants
+        # eslint 10; Expo's reanimated chain). Legacy resolution is the
+        # established convention here, not a workaround invented for CI.
+        run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Prisma generate
+        working-directory: app/backend
+        run: npx prisma generate
+
+      - name: Lint (0 errors required)
+        working-directory: app/backend
+        run: npm run lint
+
+      - name: Format check
+        working-directory: app/backend
+        run: npm run format:check
+
+      - name: Typecheck backend
+        working-directory: app/backend
+        run: npm run typecheck
+
+      - name: Architectural boundaries
+        working-directory: app/backend
+        run: npm run check:boundaries
+
+      - name: Build backend
+        working-directory: app/backend
+        run: npm run build
+
+  mobile:
+    name: Mobile typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/mobile/package-lock.json
+
+      - name: Install mobile
+        working-directory: app/mobile
+        run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Typecheck mobile
+        working-directory: app/mobile
+        run: npx tsc --noEmit
+
+  # ── The full suite. Split from `static` so a lint typo fails in ~1 minute
+  #    instead of after every embedded-Postgres run. ──
+  smokes:
+    name: Smoke suites (21)
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/backend/package-lock.json
+
+      - name: Install backend
+        working-directory: app/backend
+        run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Prisma generate
+        working-directory: app/backend
+        run: npx prisma generate
+
+      # Each suite runs its own embedded Postgres on a distinct port, so they are
+      # listed explicitly: a suite that silently stops running is a gap the
+      # aggregate command would hide.
+      - name: Engineering
+        working-directory: app/backend
+        run: npm run smoke:engineering
+      - name: Phase 1–2 (nutrition core)
+        working-directory: app/backend
+        run: |
+          npm run smoke:1c
+          npm run smoke:state
+          npm run smoke:rec
+          npm run smoke:ledger
+          npm run smoke:review
+          npm run smoke:contract
+          npm run smoke:coach
+          npm run smoke:planner
+          npm run smoke:mealplan
+      - name: Vision + Learning
+        working-directory: app/backend
+        run: |
+          npm run smoke:vision
+          npm run smoke:learning
+      - name: Governance (V4.x)
+        working-directory: app/backend
+        run: |
+          npm run smoke:rollout
+          npm run smoke:governance
+          npm run smoke:promotion
+          npm run smoke:rollback
+          npm run smoke:canary
+      - name: Copilot (V5.x)
+        working-directory: app/backend
+        run: |
+          npm run smoke:copilot
+          npm run smoke:dailycopilot
+      - name: Production readiness + deployment gate
+        working-directory: app/backend
+        run: |
+          npm run smoke:production
+          npm run smoke:deploy

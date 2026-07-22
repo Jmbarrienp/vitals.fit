@@ -1,0 +1,6 @@
+node_modules
+dist
+coverage
+*.md
+prisma/migrations
+.expo

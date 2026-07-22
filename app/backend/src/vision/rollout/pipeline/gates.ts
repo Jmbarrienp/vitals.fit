@@ -53,13 +53,19 @@ function autoAcceptReady(i: GateInputs): RolloutGate {
     reasons.push(`auto-aceptaciones potenciales insuficientes: ${i.shadowWouldAccept}/${GATE_MIN_SHADOW_WOULD_ACCEPT}`);
   }
   if (usableBins === 0) {
-    reasons.push('el proveedor activo no tiene NINGÚN bin de calibración con evidencia — auto-accept no puede graduar a nadie');
+    reasons.push(
+      'el proveedor activo no tiene NINGÚN bin de calibración con evidencia — auto-accept no puede graduar a nadie',
+    );
   }
   if (!health.green) reasons.push(...health.reasons.map((r) => `salud: ${r}`));
 
-  return gate('AUTO_ACCEPT_READY', reasons.length === 0 ? 'PASS' : 'FAIL',
+  return gate(
+    'AUTO_ACCEPT_READY',
+    reasons.length === 0 ? 'PASS' : 'FAIL',
     reasons.length === 0
-      ? [`${i.shadowDecisions} decisiones en sombra, ${i.shadowWouldAccept} habrían aceptado, ${usableBins} bins calibrados, salud en verde`]
+      ? [
+          `${i.shadowDecisions} decisiones en sombra, ${i.shadowWouldAccept} habrían aceptado, ${usableBins} bins calibrados, salud en verde`,
+        ]
       : reasons,
     {
       shadowDecisions: i.shadowDecisions,
@@ -67,7 +73,8 @@ function autoAcceptReady(i: GateInputs): RolloutGate {
       usableCalibrationBins: usableBins,
       healthGreen: health.green,
       alreadyEnabled: i.autoAcceptEnabled,
-    });
+    },
+  );
 }
 
 function providerReady(card: ProviderScorecard, calibration: CalibrationReport): RolloutGate {
@@ -83,9 +90,13 @@ function providerReady(card: ProviderScorecard, calibration: CalibrationReport):
   if (card.providerAvailability != null && card.providerAvailability < GATE_MIN_PROVIDER_AVAILABILITY) {
     reasons.push(`disponibilidad ${pct(card.providerAvailability)} < ${pct(GATE_MIN_PROVIDER_AVAILABILITY)}`);
   }
-  return gate('PROVIDER_READY', reasons.length === 0 ? 'PASS' : 'FAIL',
+  return gate(
+    'PROVIDER_READY',
+    reasons.length === 0 ? 'PASS' : 'FAIL',
     reasons.length === 0
-      ? [`'${card.providerId}': muestra suficiente, top-1 ${pct(card.top1Accuracy)}, disponibilidad ${pct(card.providerAvailability)}`]
+      ? [
+          `'${card.providerId}': muestra suficiente, top-1 ${pct(card.top1Accuracy)}, disponibilidad ${pct(card.providerAvailability)}`,
+        ]
       : reasons,
     {
       providerId: card.providerId,
@@ -94,7 +105,8 @@ function providerReady(card: ProviderScorecard, calibration: CalibrationReport):
       top1Accuracy: card.top1Accuracy,
       availability: card.providerAvailability,
       ece: calibration.expectedCalibrationError,
-    });
+    },
+  );
 }
 
 function rollbackRequired(i: GateInputs): RolloutGate {
@@ -107,13 +119,18 @@ function rollbackRequired(i: GateInputs): RolloutGate {
   const health = isHealthGreen(i.health);
   if (!health.green) reasons.push(...health.reasons);
   if (i.health.falsePositives > GATE_MAX_FALSE_POSITIVES) {
-    reasons.push(`${i.health.falsePositives} falsos positivos > ${GATE_MAX_FALSE_POSITIVES} — la plataforma está actuando mal demasiadas veces`);
+    reasons.push(
+      `${i.health.falsePositives} falsos positivos > ${GATE_MAX_FALSE_POSITIVES} — la plataforma está actuando mal demasiadas veces`,
+    );
   }
-  return gate('ROLLBACK_REQUIRED', reasons.length > 0 ? 'FAIL' : 'PASS',
+  return gate(
+    'ROLLBACK_REQUIRED',
+    reasons.length > 0 ? 'FAIL' : 'PASS',
     reasons.length > 0
       ? reasons.map((r) => `REVERTIR: ${r}`)
       : ['salud en verde y falsos positivos bajo control — no se requiere rollback'],
-    { falsePositives: i.health.falsePositives, undoRate: i.health.undoRate, healthGreen: health.green });
+    { falsePositives: i.health.falsePositives, undoRate: i.health.undoRate, healthGreen: health.green },
+  );
 }
 
 /**
@@ -141,7 +158,12 @@ function promotionGates(comparison: ProviderComparison | null): RolloutGate[] {
   ];
 }
 
-function gate(id: string, status: RolloutGate['status'], reasons: string[], evidence: RolloutGate['evidence']): RolloutGate {
+function gate(
+  id: string,
+  status: RolloutGate['status'],
+  reasons: string[],
+  evidence: RolloutGate['evidence'],
+): RolloutGate {
   return { id, status, reasons, evidence };
 }
 

@@ -86,10 +86,7 @@ export class LogsService {
     });
 
     // Emit event → recommendation listener (AI + push) and retention handler (sin cambios)
-    this.eventEmitter.emit(
-      'meal.logged',
-      new MealLoggedEvent(userId, meal.id, new Date(), totals.calories),
-    );
+    this.eventEmitter.emit('meal.logged', new MealLoggedEvent(userId, meal.id, new Date(), totals.calories));
 
     return this.getToday(userId);
   }
@@ -350,7 +347,12 @@ export class LogsService {
     });
 
     if (!dailyLog) {
-      return { message: 'No hay registros para hoy', date: today, meals: [], totals: { calories: 0, protein: 0, carbs: 0, fat: 0 } };
+      return {
+        message: 'No hay registros para hoy',
+        date: today,
+        meals: [],
+        totals: { calories: 0, protein: 0, carbs: 0, fat: 0 },
+      };
     }
 
     // Compare to goal targets
@@ -358,12 +360,14 @@ export class LogsService {
       where: { userId, isActive: true },
     });
 
-    const remaining = goal ? {
-      calories: goal.targetCalories - dailyLog.caloriesLogged,
-      proteinG: goal.proteinG - Number(dailyLog.proteinG),
-      carbsG: goal.carbsG - Number(dailyLog.carbsG),
-      fatG: goal.fatG - Number(dailyLog.fatG),
-    } : null;
+    const remaining = goal
+      ? {
+          calories: goal.targetCalories - dailyLog.caloriesLogged,
+          proteinG: goal.proteinG - Number(dailyLog.proteinG),
+          carbsG: goal.carbsG - Number(dailyLog.carbsG),
+          fatG: goal.fatG - Number(dailyLog.fatG),
+        }
+      : null;
 
     return {
       date: today,
@@ -373,12 +377,14 @@ export class LogsService {
         carbsG: dailyLog.carbsG,
         fatG: dailyLog.fatG,
       },
-      target: goal ? {
-        calories: goal.targetCalories,
-        proteinG: goal.proteinG,
-        carbsG: goal.carbsG,
-        fatG: goal.fatG,
-      } : null,
+      target: goal
+        ? {
+            calories: goal.targetCalories,
+            proteinG: goal.proteinG,
+            carbsG: goal.carbsG,
+            fatG: goal.fatG,
+          }
+        : null,
       remaining,
       meals: dailyLog.loggedMeals,
     };

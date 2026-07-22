@@ -5,6 +5,7 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { resolveCors } from './config/production-config';
@@ -53,6 +54,26 @@ async function bootstrap() {
   app.useGlobalGuards(new RateLimitGuard(app.get(Reflector), app.get(ConfigService)));
 
   app.setGlobalPrefix('api');
+
+  // V5.4 — OpenAPI. Documentation ONLY: it introspects the routes and DTOs that
+  // already exist and changes no behavior. Disabled in production by default
+  // (SWAGGER_ENABLED=true to opt in) because the API surface includes operator
+  // endpoints whose shape need not be public.
+  if (process.env.NODE_ENV !== 'production' || process.env.SWAGGER_ENABLED === 'true') {
+    const openApi = new DocumentBuilder()
+      .setTitle('Vitals Fit API')
+      .setDescription(
+        'Nutrition platform API. Endpoints under /vision/{rollout,governance,promotion,rollback,canary} ' +
+          'and the platform-wide /vision/learning analytics are OPERATOR-only (ADMIN_EMAILS allowlist).',
+      )
+      .setVersion('5.4')
+      .addBearerAuth()
+      .build();
+    SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, openApi), {
+      swaggerOptions: { persistAuthorization: true },
+    });
+    logger.log('OpenAPI disponible en /api/docs');
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');

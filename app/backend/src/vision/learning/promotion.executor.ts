@@ -105,20 +105,38 @@ function assessRisk(
     factors.push('muestra insuficiente: cualquier cambio sería una apuesta, no una decisión');
     risk = 'HIGH';
   }
-  if (challenger.calibrationError != null && incumbent.calibrationError != null && challenger.calibrationError > incumbent.calibrationError) {
-    factors.push(`el challenger está peor calibrado (ECE ${pct(challenger.calibrationError)} vs ${pct(incumbent.calibrationError)}) — auto-accept depende de la calibración, así que la graduación se volvería más conservadora`);
+  if (
+    challenger.calibrationError != null &&
+    incumbent.calibrationError != null &&
+    challenger.calibrationError > incumbent.calibrationError
+  ) {
+    factors.push(
+      `el challenger está peor calibrado (ECE ${pct(challenger.calibrationError)} vs ${pct(incumbent.calibrationError)}) — auto-accept depende de la calibración, así que la graduación se volvería más conservadora`,
+    );
     risk = risk === 'HIGH' ? 'HIGH' : 'MEDIUM';
   }
-  if (challenger.meanTokensPerScan != null && incumbent.meanTokensPerScan != null && challenger.meanTokensPerScan > incumbent.meanTokensPerScan * 1.5) {
-    factors.push(`coste por scan >50% mayor (${num(incumbent.meanTokensPerScan)} -> ${num(challenger.meanTokensPerScan)} tokens)`);
+  if (
+    challenger.meanTokensPerScan != null &&
+    incumbent.meanTokensPerScan != null &&
+    challenger.meanTokensPerScan > incumbent.meanTokensPerScan * 1.5
+  ) {
+    factors.push(
+      `coste por scan >50% mayor (${num(incumbent.meanTokensPerScan)} -> ${num(challenger.meanTokensPerScan)} tokens)`,
+    );
     risk = risk === 'HIGH' ? 'HIGH' : 'MEDIUM';
   }
-  if (challenger.meanLatencyMs != null && incumbent.meanLatencyMs != null && challenger.meanLatencyMs > incumbent.meanLatencyMs * 1.5) {
+  if (
+    challenger.meanLatencyMs != null &&
+    incumbent.meanLatencyMs != null &&
+    challenger.meanLatencyMs > incumbent.meanLatencyMs * 1.5
+  ) {
     factors.push(`latencia >50% mayor (${ms(incumbent.meanLatencyMs)} -> ${ms(challenger.meanLatencyMs)})`);
     risk = risk === 'HIGH' ? 'HIGH' : 'MEDIUM';
   }
   if (activeProviderId !== incumbent.providerId) {
-    factors.push(`el proveedor activo ('${activeProviderId}') no es el incumbente evaluado ('${incumbent.providerId}') — la comparación no describe lo que corre hoy en producción`);
+    factors.push(
+      `el proveedor activo ('${activeProviderId}') no es el incumbente evaluado ('${incumbent.providerId}') — la comparación no describe lo que corre hoy en producción`,
+    );
     risk = 'HIGH';
   }
   if (factors.length === 0) factors.push('sin factores de riesgo detectados en los datos disponibles');

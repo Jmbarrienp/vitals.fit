@@ -12,7 +12,13 @@ const MEDIUM_THRESHOLD = 0.45;
 
 export function scoreCandidate(recognition: number, match: number, portion: number): CandidateConfidence {
   const overall = clamp01(recognition) * clamp01(match) * Math.pow(clamp01(portion), PORTION_WEIGHT);
-  return { recognition: clamp01(recognition), match: clamp01(match), portion: clamp01(portion), overall, band: bandFor(overall) };
+  return {
+    recognition: clamp01(recognition),
+    match: clamp01(match),
+    portion: clamp01(portion),
+    overall,
+    band: bandFor(overall),
+  };
 }
 
 export function bandFor(overall: number): ConfidenceBand {
@@ -47,7 +53,10 @@ export function deriveUxMode(
 }
 
 /** Scan-level confidence: calorie-weighted mean of candidate overalls (falls back to a plain mean). */
-export function scoreScan(candidates: FoodCandidate[], calorieWeights: number[]): { overall: number; band: ConfidenceBand } {
+export function scoreScan(
+  candidates: FoodCandidate[],
+  calorieWeights: number[],
+): { overall: number; band: ConfidenceBand } {
   if (candidates.length === 0) return { overall: 0, band: 'LOW' };
   const totalWeight = calorieWeights.reduce((a, b) => a + b, 0);
   const overall =
