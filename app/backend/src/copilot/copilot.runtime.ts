@@ -41,12 +41,17 @@ export class NutritionCopilotRuntime {
   ) {}
 
   async session(userId: string, generatedAt: string = new Date().toISOString()): Promise<CopilotSession> {
-    // One context build, shared. Planner/meal-planner build their own internally
-    // (their encapsulation); the composer only ever sees public contracts.
-    const [ctx, plan, mealPlan, activeRows] = await Promise.all([
-      this.coachingContext.build(userId, 'full'),
-      this.planner.getPlan(userId),
-      this.mealPlanner.getMealPlan(userId),
+    // V5.2 — ONE context build, genuinely shared. Until this slice the planner
+    // and meal planner each built their own copy internally, so a single
+    // Copilot session triggered THREE identical builds of the platform's most
+    // expensive read (rollup + ledger history + review + today's meals +
+    // commitments) on the endpoint the app opens to. They now accept an
+    // already-built context; the result is byte-identical because the context
+    // is the same deterministic snapshot either way.
+    const ctx = await this.coachingContext.build(userId, 'full');
+    const [plan, mealPlan, activeRows] = await Promise.all([
+      this.planner.getPlan(userId, ctx),
+      this.mealPlanner.getMealPlan(userId, ctx),
       this.recommendations.getActive(userId),
     ]);
 

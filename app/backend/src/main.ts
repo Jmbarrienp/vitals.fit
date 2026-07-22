@@ -4,6 +4,7 @@ import { NestFactory, Reflector } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -18,6 +19,16 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: '8mb' });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
+  // V5.2 — intentional HttpExceptions pass through untouched; only unhandled
+  // errors are normalized, so no internal detail (Prisma table/column names)
+  // reaches a client and every 500 is logged with the route that caused it.
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  // V5.2 — without this Nest never runs onModuleDestroy, so PrismaService's
+  // pool drain would never fire on SIGTERM and every redeploy would leak
+  // database connections.
+  app.enableShutdownHooks();
 
   app.enableCors({
     origin: '*',

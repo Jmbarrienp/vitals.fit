@@ -20,11 +20,15 @@ import { PlannerModule } from './planner/planner.module';
 import { MealPlannerModule } from './meal-planner/meal-planner.module';
 import { VisionModule } from './vision/vision.module';
 import { CopilotModule } from './copilot/copilot.module';
+import { validateEnv } from './config/env.validation';
 
 @Module({
   controllers: [AppController],
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // V5.2 — fail fast on a misconfigured deploy. A missing or placeholder
+    // JWT_SECRET used to boot "fine" and either fail at the first login or,
+    // worse, sign every token with the value published in .env.example.
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     EventEmitterModule.forRoot(),
     AiModule,
     PushModule,

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CoachingContextService } from '../nutrition-state/coaching-context.service';
+import { CoachingContext } from '../nutrition-state/types/coaching-context';
 import { decidePlan } from '../planner/adaptive-planner.engine';
 import { PLANNER_VERSION } from '../planner/types/nutrition-plan';
 import { FoodService } from '../food/food.service';
@@ -26,9 +27,14 @@ export class MealPlannerService {
     private readonly food: FoodService,
   ) {}
 
-  async getMealPlan(userId: string): Promise<MealPlan> {
+  /**
+   * `providedCtx` (V5.2) lets a caller that ALREADY built the context reuse
+   * it. Optional and fully backward compatible — the context is the same
+   * deterministic snapshot whether built here or passed in.
+   */
+  async getMealPlan(userId: string, providedCtx?: CoachingContext): Promise<MealPlan> {
     // One context build feeds both the planner decision and the meal signals.
-    const ctx = await this.coachingContext.build(userId, 'full');
+    const ctx = providedCtx ?? (await this.coachingContext.build(userId, 'full'));
     const plan = decidePlan(ctx);
 
     const [favorites, frequent, recent, custom, common] = await Promise.all([

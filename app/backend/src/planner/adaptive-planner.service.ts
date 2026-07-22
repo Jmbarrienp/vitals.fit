@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CoachingContextService } from '../nutrition-state/coaching-context.service';
+import { CoachingContext } from '../nutrition-state/types/coaching-context';
 import { decidePlan } from './adaptive-planner.engine';
 import { NutritionPlan } from './types/nutrition-plan';
 
@@ -18,8 +19,14 @@ import { NutritionPlan } from './types/nutrition-plan';
 export class AdaptivePlannerService {
   constructor(private readonly coachingContext: CoachingContextService) {}
 
-  async getPlan(userId: string): Promise<NutritionPlan> {
-    const ctx = await this.coachingContext.build(userId, 'full');
-    return decidePlan(ctx);
+  /**
+   * `ctx` (V5.2) lets a caller that ALREADY built the context pass it in
+   * instead of paying for a second identical build. Optional and fully
+   * backward compatible: every existing caller keeps its exact behavior, and
+   * the context is the same deterministic snapshot either way.
+   */
+  async getPlan(userId: string, ctx?: CoachingContext): Promise<NutritionPlan> {
+    const context = ctx ?? (await this.coachingContext.build(userId, 'full'));
+    return decidePlan(context);
   }
 }
