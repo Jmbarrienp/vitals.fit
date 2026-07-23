@@ -1,7 +1,12 @@
 import { Controller, Get, Request, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MealPlannerService } from './meal-planner.service';
+import { ApiAuthErrors } from '../common/swagger/error-responses';
 
+@ApiTags('meal-plan')
+@ApiBearerAuth()
+@ApiAuthErrors()
 @UseGuards(JwtAuthGuard)
 @Controller('meal-plan')
 export class MealPlannerController {

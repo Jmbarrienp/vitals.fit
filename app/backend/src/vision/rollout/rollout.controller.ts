@@ -1,7 +1,12 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
+import { parseDays } from '../../common/http/query-parsers';
 import { RolloutEngine } from './rollout.engine';
+import { ApiAdminErrors } from '../../common/swagger/error-responses';
+
+const DAYS_QUERY = { name: 'days', required: false, type: String, description: 'Lookback window in days (1–3650).' };
 
 /**
  * The Rollout API (V4.0) — five GET routes, all read-only by construction:
@@ -10,6 +15,10 @@ import { RolloutEngine } from './rollout.engine';
  * raw rows. Guarded by the platform's JWT guard (first candidates for an
  * admin role when one exists).
  */
+@ApiTags('vision-rollout')
+@ApiBearerAuth()
+@ApiAdminErrors()
+@ApiQuery(DAYS_QUERY)
 @UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class RolloutController {
@@ -46,13 +55,4 @@ export class RolloutController {
   timeline(@Query('days') days?: string) {
     return this.engine.timeline(parseDays(days));
   }
-}
-
-function parseDays(raw?: string): number | undefined {
-  if (raw === undefined) return undefined;
-  const days = Number(raw);
-  if (!Number.isInteger(days) || days < 1 || days > 3650) {
-    throw new BadRequestException('days must be an integer between 1 and 3650.');
-  }
-  return days;
 }

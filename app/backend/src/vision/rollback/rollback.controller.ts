@@ -1,7 +1,12 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
+import { parseDays } from '../../common/http/query-parsers';
 import { RollbackEngine } from './rollback.engine';
+import { ApiAdminErrors } from '../../common/swagger/error-responses';
+
+const DAYS_QUERY = { name: 'days', required: false, type: String, description: 'Lookback window in days (1–3650).' };
 
 /**
  * Safe rollback plan API (V4.3) — GET only, read-only by construction. Every
@@ -9,6 +14,10 @@ import { RollbackEngine } from './rollback.engine';
  * provider, or write anything. The plan is a document a human reads and acts
  * on; these routes hand it over, they do not act on it.
  */
+@ApiTags('vision-rollback')
+@ApiBearerAuth()
+@ApiAdminErrors()
+@ApiQuery(DAYS_QUERY)
 @UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class RollbackController {
@@ -43,13 +52,4 @@ export class RollbackController {
   summary(@Query('days') days?: string) {
     return this.engine.summary(parseDays(days));
   }
-}
-
-function parseDays(raw?: string): number | undefined {
-  if (raw === undefined) return undefined;
-  const days = Number(raw);
-  if (!Number.isInteger(days) || days < 1 || days > 3650) {
-    throw new BadRequestException('days must be an integer between 1 and 3650.');
-  }
-  return days;
 }

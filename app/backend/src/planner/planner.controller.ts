@@ -1,7 +1,12 @@
 import { Controller, Get, Request, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdaptivePlannerService } from './adaptive-planner.service';
+import { ApiAuthErrors } from '../common/swagger/error-responses';
 
+@ApiTags('planner')
+@ApiBearerAuth()
+@ApiAuthErrors()
 @UseGuards(JwtAuthGuard)
 @Controller('planner')
 export class PlannerController {

@@ -1,9 +1,11 @@
 import { Controller, Get, Res } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PrismaService } from './prisma/prisma.service';
 import { collectEnvProblems } from './config/env.validation';
 import { resolveAdminEmails, resolveCors } from './config/production-config';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
+import { ApiPublicErrors } from './common/swagger/error-responses';
 
 /** A DB probe must never hang a health check — the orchestrator has its own deadline. */
 const PROBE_TIMEOUT_MS = 2_000;
@@ -20,10 +22,15 @@ const PROBE_TIMEOUT_MS = 2_000;
  * are unchanged and `status` is still `'ok'` on the happy path — existing
  * consumers see exactly what they saw before, plus a `database` block.
  */
+@ApiTags('platform')
+@ApiPublicErrors()
 @Controller()
 export class AppController {
   constructor(private readonly prisma: PrismaService) {}
 
+  @ApiOperation({
+    summary: 'Liveness + database probe. No auth required — orchestrators and uptime monitors call this.',
+  })
   @Get('health')
   async health(@Res({ passthrough: true }) res: Response) {
     const startedAt = Date.now();

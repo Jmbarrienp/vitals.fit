@@ -1,7 +1,12 @@
 import { Controller, Get, Request, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WeeklyCoachService } from './weekly-coach.service';
+import { ApiAuthErrors } from '../common/swagger/error-responses';
 
+@ApiTags('coach')
+@ApiBearerAuth()
+@ApiAuthErrors()
 @UseGuards(JwtAuthGuard)
 @Controller('coach')
 export class CoachController {

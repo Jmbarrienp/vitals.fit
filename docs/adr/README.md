@@ -42,3 +42,5 @@ No escribas uno para: elecciones de estilo, cambios internos reversibles en una 
 |---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Registrar decisiones arquitectónicas | Accepted |
 | [0002](0002-custom-boundary-checker-with-ratchet.md) | Checker de límites propio con trinquete | Accepted |
+| [0003](0003-contract-testing-boots-from-dist-not-jest.md) | Contract testing arranca desde `dist/`, no Jest e2e | Accepted |
+| [0004](0004-error-envelope-and-ownership-inconsistencies-documented-not-unified.md) | Envelope de error y patrones de ownership: documentados, no unificados | Accepted |

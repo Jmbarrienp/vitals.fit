@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RateLimit } from '../common/guards/rate-limit.guard';
 import { VisionScanService } from './vision-scan.service';
@@ -6,6 +7,7 @@ import { CreateScanDto } from './dto/create-scan.dto';
 import { CreateBarcodeScanDto } from './dto/create-barcode-scan.dto';
 import { CreateLabelScanDto } from './dto/create-label-scan.dto';
 import { ConfirmScanDto } from './dto/confirm-scan.dto';
+import { ApiAuthErrors, ApiNotFoundError, ApiRateLimited, ApiValidationError } from '../common/swagger/error-responses';
 
 /**
  * Nutrition Vision (Phase 2D.2 V0). Vision never writes LoggedMeal directly —
@@ -13,6 +15,9 @@ import { ConfirmScanDto } from './dto/confirm-scan.dto';
  * downstream consumer (rollup, ledger, review, planner, coach, meal planner)
  * keeps working unchanged.
  */
+@ApiTags('vision')
+@ApiBearerAuth()
+@ApiAuthErrors()
 @UseGuards(JwtAuthGuard)
 @Controller('vision/scans')
 export class VisionController {
@@ -23,6 +28,9 @@ export class VisionController {
    * never leaves the backend and mobile never talks to a provider — it posts a
    * photo to this endpoint and receives a platform-shaped proposal.
    */
+  @ApiOperation({ summary: 'Submit a photo (or a stable image reference) for recognition.' })
+  @ApiValidationError()
+  @ApiRateLimited()
   @RateLimit('VISION')
   @Post()
   create(@Request() req: { user: { id: string } }, @Body() dto: CreateScanDto) {
@@ -43,6 +51,9 @@ export class VisionController {
    * reject/fallback/get below are shared unchanged since the VisionScan
    * lifecycle they operate on is source-agnostic.
    */
+  @ApiOperation({ summary: 'Submit an on-device-decoded barcode for lookup.' })
+  @ApiValidationError()
+  @ApiRateLimited()
   @RateLimit('BARCODE')
   @Post('barcode')
   createBarcode(@Request() req: { user: { id: string } }, @Body() dto: CreateBarcodeScanDto) {
@@ -55,6 +66,9 @@ export class VisionController {
    * comes back with `label` carrying the transcribed facts for the user to edit
    * and confirm; confirm/reject/fallback below are shared unchanged.
    */
+  @ApiOperation({ summary: 'Submit a nutrition-label photo for OCR transcription.' })
+  @ApiValidationError()
+  @ApiRateLimited()
   @RateLimit('VISION')
   @Post('label')
   createLabel(@Request() req: { user: { id: string } }, @Body() dto: CreateLabelScanDto) {
@@ -70,22 +84,32 @@ export class VisionController {
     return this.scans.createLabelScan(req.user.id, dto.imageRef ?? '', image);
   }
 
+  @ApiOperation({ summary: 'A single scan by id, including its proposal once ready.' })
+  @ApiNotFoundError('Scan')
   @Get(':id')
   get(@Request() req: { user: { id: string } }, @Param('id') id: string) {
     return this.scans.getScan(req.user.id, id);
   }
 
+  /** Hands off to LogsService.logMeal — Vision never writes LoggedMeal directly. */
+  @ApiOperation({ summary: 'Confirm a proposal (with any user edits) and log it as a meal.' })
+  @ApiValidationError()
+  @ApiNotFoundError('Scan')
   @Post(':id/confirm')
   confirm(@Request() req: { user: { id: string } }, @Param('id') id: string, @Body() dto: ConfirmScanDto) {
     return this.scans.confirmScan(req.user.id, { scanId: id, mealType: dto.mealType, items: dto.items as any });
   }
 
+  @ApiOperation({ summary: 'Reject a proposal — logs nothing.' })
+  @ApiNotFoundError('Scan')
   @Post(':id/reject')
   reject(@Request() req: { user: { id: string } }, @Param('id') id: string) {
     return this.scans.rejectScan(req.user.id, id);
   }
 
   /** The user chose to log manually instead (V1). Records the fallback; creates no meal. */
+  @ApiOperation({ summary: 'Record that the caller logged manually instead of using the proposal.' })
+  @ApiNotFoundError('Scan')
   @Post(':id/fallback')
   fallback(@Request() req: { user: { id: string } }, @Param('id') id: string) {
     return this.scans.markFallbackManual(req.user.id, id);
@@ -96,6 +120,8 @@ export class VisionController {
    * and records the undo as ground truth — the platform acted on its own and
    * was told no, which is the strongest signal it can receive.
    */
+  @ApiOperation({ summary: 'Revert an auto-accepted scan (deletes the meal it created).' })
+  @ApiNotFoundError('Scan')
   @Post(':id/undo')
   undo(@Request() req: { user: { id: string } }, @Param('id') id: string) {
     return this.scans.undoScan(req.user.id, id);

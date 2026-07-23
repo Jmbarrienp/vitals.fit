@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { LocalFoodAdapter } from './adapters/local.adapter';
 import { BarcodeProductData } from './adapters/food-adapter.interface';
 import { CreateCustomFoodDto } from './dto/create-custom-food.dto';
@@ -44,7 +44,15 @@ export class FoodService {
     return this.adapter.getCustom(userId);
   }
 
+  // V5.5 — FoodFavorite.foodItemId carries a real FK to FoodItem. Without this
+  // check, a bogus id reached the upsert directly and Prisma's FK-violation
+  // error (not a Nest HttpException) fell through AllExceptionsFilter's
+  // catch-all into an opaque 500 — the client's own mistake reported as a
+  // server failure. Same existence-check shape as LogsService.getOwnedMeal /
+  // VisionScanService.getOwnedScan, applied to the one write path that lacked it.
   async addFavorite(userId: string, foodItemId: string) {
+    const food = await this.adapter.findById(foodItemId);
+    if (!food) throw new NotFoundException('Food not found.');
     await this.adapter.addFavorite(userId, foodItemId);
     return { ok: true };
   }

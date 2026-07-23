@@ -1,10 +1,15 @@
 import { Controller, Get, Query, Request, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { NutritionStateService } from './nutrition-state.service';
 import { WeeklyLedgerService } from './weekly-ledger.service';
 import { WeeklyReviewService } from './weekly-review.service';
 import { CoachingContextService } from './coaching-context.service';
+import { ApiAuthErrors } from '../common/swagger/error-responses';
 
+@ApiTags('nutrition-state')
+@ApiBearerAuth()
+@ApiAuthErrors()
 @UseGuards(JwtAuthGuard)
 @Controller('nutrition-state')
 export class NutritionStateController {
@@ -26,6 +31,13 @@ export class NutritionStateController {
    * Backfills any newly-completed weeks on read. Historical foundation for Weekly/
    * Monthly Review, Progress Timeline and Claude Coach.
    */
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: String,
+    description:
+      'Weeks to return, clamped to 1–52 (default 26). Never rejects — invalid input silently falls back to the default.',
+  })
   @Get('weekly')
   getWeekly(@Request() req: { user: { id: string } }, @Query('limit') limit?: string) {
     const n = limit ? Math.min(Math.max(parseInt(limit, 10) || 26, 1), 52) : 26;

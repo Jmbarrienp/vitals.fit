@@ -1,7 +1,19 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
+import { parseDays, parsePercent } from '../../common/http/query-parsers';
 import { CanaryEngine } from './canary.engine';
+import { ApiAdminErrors } from '../../common/swagger/error-responses';
+
+const DAYS_QUERY = { name: 'days', required: false, type: String, description: 'Lookback window in days (1–3650).' };
+const AT_PERCENT_QUERY = {
+  name: 'atPercent',
+  required: false,
+  type: String,
+  description:
+    "The operator's stated current rollout position, 0–100 (default 0). The platform persists no live canary state.",
+};
 
 /**
  * Canary progression API (V4.4) — GET only, read-only by construction. Every
@@ -12,6 +24,11 @@ import { CanaryEngine } from './canary.engine';
  * `atPercent` is the operator's stated current position (0..100; default 0 =
  * pre-rollout), since the platform persists no live canary state.
  */
+@ApiTags('vision-canary')
+@ApiBearerAuth()
+@ApiAdminErrors()
+@ApiQuery(AT_PERCENT_QUERY)
+@ApiQuery(DAYS_QUERY)
 @UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class CanaryController {
@@ -46,22 +63,4 @@ export class CanaryController {
   timeline(@Query('atPercent') atPercent?: string, @Query('days') days?: string) {
     return this.engine.timeline(parsePercent(atPercent), parseDays(days));
   }
-}
-
-function parsePercent(raw?: string): number {
-  if (raw === undefined) return 0;
-  const p = Number(raw);
-  if (!Number.isFinite(p) || p < 0 || p > 100) {
-    throw new BadRequestException('atPercent must be a number between 0 and 100.');
-  }
-  return p;
-}
-
-function parseDays(raw?: string): number | undefined {
-  if (raw === undefined) return undefined;
-  const days = Number(raw);
-  if (!Number.isInteger(days) || days < 1 || days > 3650) {
-    throw new BadRequestException('days must be an integer between 1 and 3650.');
-  }
-  return days;
 }

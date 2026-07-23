@@ -41,7 +41,9 @@
     "typecheck": "tsc --noEmit",
     "check:boundaries": "ts-node -P tsconfig.smoke.json --transpile-only scripts/check-boundaries.ts",
     "smoke:engineering": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-engineering.ts",
-    "verify": "npm run lint && npm run typecheck && npm run check:boundaries && npm run build"
+    "smoke:http-contract": "ts-node -P tsconfig.smoke.json --transpile-only scripts/smoke-http-contract.ts",
+    "verify:smokes": "npm run smoke:engineering && npm run smoke:http-contract && npm run smoke:1c && npm run smoke:state && npm run smoke:rec && npm run smoke:ledger && npm run smoke:review && npm run smoke:contract && npm run smoke:coach && npm run smoke:planner && npm run smoke:mealplan && npm run smoke:vision && npm run smoke:learning && npm run smoke:rollout && npm run smoke:governance && npm run smoke:promotion && npm run smoke:rollback && npm run smoke:canary && npm run smoke:copilot && npm run smoke:dailycopilot && npm run smoke:production && npm run smoke:deploy",
+    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run check:boundaries && npm run build && npm run verify:smokes"
   },
   "keywords": [],
   "author": "",
@@ -56,6 +58,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^25.6.0",
     "@types/passport-jwt": "^4.0.1",
+    "@types/supertest": "^7.2.1",
     "dotenv": "^17.4.2",
     "embedded-postgres": "^18.4.0-beta.17",
     "eslint": "^9.39.5",
@@ -63,6 +66,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.1.1",
     "prettier": "^3.9.6",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "typescript-eslint": "^8.65.0"
   },

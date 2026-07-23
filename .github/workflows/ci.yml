@@ -88,7 +88,7 @@ jobs:
   # ── The full suite. Split from `static` so a lint typo fails in ~1 minute
   #    instead of after every embedded-Postgres run. ──
   smokes:
-    name: Smoke suites (21)
+    name: Smoke suites (21 + HTTP contract)
     runs-on: ubuntu-latest
     needs: static
     steps:
@@ -113,6 +113,13 @@ jobs:
       - name: Engineering
         working-directory: app/backend
         run: npm run smoke:engineering
+      # Sources the OpenAPI document from a fresh `dist/` build (the plugin
+      # that enriches DTO schemas only runs through `nest build`), so this
+      # step rebuilds internally rather than trusting `static`'s dist/ — a
+      # separate job on a separate runner never shares that job's filesystem.
+      - name: HTTP Contract (OpenAPI + Supertest)
+        working-directory: app/backend
+        run: npm run smoke:http-contract
       - name: Phase 1–2 (nutrition core)
         working-directory: app/backend
         run: |

@@ -1,7 +1,12 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
+import { parseDays } from '../../common/http/query-parsers';
 import { GovernanceEngine } from './governance.engine';
+import { ApiAdminErrors } from '../../common/swagger/error-responses';
+
+const DAYS_QUERY = { name: 'days', required: false, type: String, description: 'Lookback window in days (1–3650).' };
 
 /**
  * Provider governance API (V4.1) — read-only by construction. Every handler
@@ -10,6 +15,10 @@ import { GovernanceEngine } from './governance.engine';
  * shadow evidence is stored as platform-shaped detections, so there is nothing
  * vendor-specific here to leak.
  */
+@ApiTags('vision-governance')
+@ApiBearerAuth()
+@ApiAdminErrors()
+@ApiQuery(DAYS_QUERY)
 @UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision/governance')
 export class GovernanceController {
@@ -39,13 +48,4 @@ export class GovernanceController {
   recommendation(@Query('days') days?: string) {
     return this.engine.recommend(parseDays(days));
   }
-}
-
-function parseDays(raw?: string): number | undefined {
-  if (raw === undefined) return undefined;
-  const days = Number(raw);
-  if (!Number.isInteger(days) || days < 1 || days > 3650) {
-    throw new BadRequestException('days must be an integer between 1 and 3650.');
-  }
-  return days;
 }

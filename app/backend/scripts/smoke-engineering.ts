@@ -104,6 +104,10 @@ function main() {
 
   console.log('\n── V5.4: OPENAPI (solo documentación, sin cambio de comportamiento) ──');
   const mainTs = read(path.join(BACKEND, 'src', 'main.ts'));
+  // V5.5 extracted the DocumentBuilder config out of main.ts into its own
+  // module (src/bootstrap/openapi-document.ts) so the contract-snapshot suite
+  // can build the SAME document main.ts serves — main.ts now just calls it.
+  const openApiDocTs = read(path.join(BACKEND, 'src', 'bootstrap', 'openapi-document.ts'));
   check('@nestjs/swagger declarado como dependencia', !!(pkg.dependencies ?? {})['@nestjs/swagger']);
   check(
     'OpenAPI montado en /api/docs',
@@ -113,8 +117,8 @@ function main() {
     'APAGADO en producción salvo opt-in explícito',
     mainTs.includes("NODE_ENV !== 'production'") && mainTs.includes('SWAGGER_ENABLED'),
   );
-  check('el documento declara auth Bearer', mainTs.includes('addBearerAuth'));
-  check('advierte que los endpoints de gobernanza son de OPERADOR', mainTs.includes('OPERATOR-only'));
+  check('el documento declara auth Bearer', openApiDocTs.includes('addBearerAuth'));
+  check('advierte que los endpoints de gobernanza son de OPERADOR', openApiDocTs.includes('OPERATOR-only'));
 
   console.log('\n── V5.4: ADR (estándar para decisiones futuras) ──');
   const adrDir = path.join(REPO, 'docs', 'adr');

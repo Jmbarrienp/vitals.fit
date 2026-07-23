@@ -1,6 +1,8 @@
 import { Controller, Get, Request, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { NutritionCopilotRuntime } from './copilot.runtime';
+import { ApiAuthErrors } from '../common/swagger/error-responses';
 
 /**
  * Copilot API (V5.0) — GET only, read-only by construction. The session is a
@@ -9,6 +11,9 @@ import { NutritionCopilotRuntime } from './copilot.runtime';
  * engines that own them (logs, recommendations, vision), never through the
  * Copilot.
  */
+@ApiTags('copilot')
+@ApiBearerAuth()
+@ApiAuthErrors()
 @UseGuards(JwtAuthGuard)
 @Controller('copilot')
 export class CopilotController {

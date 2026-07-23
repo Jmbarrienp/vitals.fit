@@ -1,7 +1,12 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
+import { parseDays } from '../../common/http/query-parsers';
 import { PromotionExecutorEngine } from './promotion-executor.engine';
+import { ApiAdminErrors } from '../../common/swagger/error-responses';
+
+const DAYS_QUERY = { name: 'days', required: false, type: String, description: 'Lookback window in days (1–3650).' };
 
 /**
  * Promotion plan API (V4.2) — GET only, read-only by construction. Every route
@@ -9,6 +14,10 @@ import { PromotionExecutorEngine } from './promotion-executor.engine';
  * flag, or write anything. The plan is a document a human reads; these routes
  * hand it over, they do not act on it.
  */
+@ApiTags('vision-promotion')
+@ApiBearerAuth()
+@ApiAdminErrors()
+@ApiQuery(DAYS_QUERY)
 @UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('vision')
 export class PromotionController {
@@ -43,13 +52,4 @@ export class PromotionController {
   rollback(@Query('days') days?: string) {
     return this.engine.rollback(parseDays(days));
   }
-}
-
-function parseDays(raw?: string): number | undefined {
-  if (raw === undefined) return undefined;
-  const days = Number(raw);
-  if (!Number.isInteger(days) || days < 1 || days > 3650) {
-    throw new BadRequestException('days must be an integer between 1 and 3650.');
-  }
-  return days;
 }
