@@ -39,3 +39,6 @@ Thumbs.db
 
 # carpeta huerfana
 fitness-app/
+
+# configuracion local de Claude Code (rutas de la maquina)
+.claude/settings.local.json
