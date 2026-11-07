@@ -284,9 +284,11 @@ async function main() {
   await prisma.$connect();
   const controller = new AppController(prisma);
 
-  // First, PROVE readiness catches a misconfigured instance: JWT_SECRET is not
-  // set in this smoke's environment, which is exactly the class of mistake the
-  // gate exists to catch. This is the pre-fix state, asserted deliberately.
+  // First, PROVE readiness catches a misconfigured instance: no JWT_SECRET,
+  // which is exactly the class of mistake the gate exists to catch. This is the
+  // pre-fix state, asserted deliberately. Unset it explicitly: CI exports a
+  // JWT_SECRET for the whole job, so the check must not rely on the caller's env.
+  delete process.env.JWT_SECRET;
   const misconfiguredRes: any = {
     statusCode: 200,
     status(c: number) {
