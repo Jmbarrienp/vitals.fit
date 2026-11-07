@@ -18,7 +18,9 @@ import * as os from 'os';
 import * as path from 'path';
 
 const ignoreTeardownNoise = (e: any) => {
-  if (String(e?.message ?? e).includes('Connection terminated')) return;
+  // Linux/CI: stopping the embedded PG surfaces as admin_shutdown (57P01)
+  // instead of "Connection terminated" — same harmless teardown noise.
+  if (String(e?.message ?? e).includes('Connection terminated') || e?.code === '57P01') return;
   throw e;
 };
 process.on('uncaughtException', ignoreTeardownNoise);
